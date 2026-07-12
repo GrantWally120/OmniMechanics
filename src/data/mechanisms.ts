@@ -1,0 +1,248 @@
+import type { Mechanism } from "../types";
+
+export const MECHANISMS: Mechanism[] = [
+  {
+    id: "gear-train",
+    index: 1,
+    name: "Spur Gear Train",
+    tagline: "Trades speed for turning force between shafts.",
+    category: "Machines",
+    principle: "Conservation of power: torque × speed stays constant.",
+    complexity: 2,
+    era: "Antiquity",
+    summary:
+      "When two toothed wheels mesh, one cannot slip past the other — every tooth that leaves the contact point drags the next one in. A small wheel driving a large one turns slower but pushes harder; reverse them and you trade that force back for speed. Chain several together and you can dial almost any ratio you like.",
+    steps: [
+      { label: "Drive", text: "The input (driver) gear is turned by a motor or handle.", at: 0.0 },
+      { label: "Mesh", text: "Its teeth push against the teeth of the next gear at the pitch line.", at: 0.35 },
+      { label: "Reverse", text: "The driven gear spins the opposite way — and at a speed set by the tooth ratio.", at: 0.6 },
+      { label: "Multiply", text: "A larger gear turns slower but delivers proportionally more torque.", at: 0.85 },
+    ],
+    components: [
+      { name: "Driver gear", note: "Receives the input rotation." },
+      { name: "Idler / driven gears", note: "Pass motion along and set direction." },
+      { name: "Teeth (pitch)", note: "Equal spacing lets different sizes mesh cleanly." },
+      { name: "Shafts & bearings", note: "Hold each gear on its axis of rotation." },
+    ],
+    facts: [
+      "Gear ratio = teeth on driven ÷ teeth on driver. A 12→36 pair turns ⅓ as fast with 3× the torque.",
+      "An odd number of gears reverses direction; an even count restores it.",
+      "The oldest known geared device, the Antikythera mechanism, modelled the heavens around 100 BCE.",
+    ],
+    diagram: "gearTrain",
+  },
+  {
+    id: "four-stroke",
+    index: 2,
+    name: "Four-Stroke Engine",
+    tagline: "Turns tiny explosions into smooth rotation.",
+    category: "Energy",
+    principle: "Burning fuel expands gas; expansion pushes a piston.",
+    complexity: 4,
+    era: "1876",
+    summary:
+      "A four-stroke engine repeats one bargain thousands of times a minute: pull in air and fuel, squeeze it, ignite it, then sweep out the smoke. Only one of the four strokes makes power — the crankshaft's momentum carries the piston through the other three, and multiple cylinders take turns so the output never stalls.",
+    steps: [
+      { label: "Intake", text: "The piston drops and the intake valve opens, drawing in air and fuel.", at: 0.05 },
+      { label: "Compression", text: "Both valves close; the rising piston squeezes the mixture tight.", at: 0.3 },
+      { label: "Power", text: "The spark plug fires. Burning gas expands and slams the piston down.", at: 0.55 },
+      { label: "Exhaust", text: "The exhaust valve opens; the rising piston pushes spent gas out.", at: 0.8 },
+    ],
+    components: [
+      { name: "Piston", note: "Slides in the cylinder, driven by pressure." },
+      { name: "Connecting rod & crank", note: "Convert up-down motion into rotation." },
+      { name: "Valves", note: "Time the flow of fresh charge and exhaust." },
+      { name: "Spark plug", note: "Ignites the compressed mixture on cue." },
+    ],
+    facts: [
+      "The full cycle takes two crankshaft revolutions — 720° — for a single power stroke.",
+      "At 3,000 rpm each cylinder fires 25 times every second.",
+      "Nikolaus Otto's 1876 engine is why the cycle is still called the 'Otto cycle'.",
+    ],
+    diagram: "fourStroke",
+  },
+  {
+    id: "pin-tumbler",
+    index: 3,
+    name: "Pin-Tumbler Lock",
+    tagline: "Only the right cut lifts every pin to the same line.",
+    category: "Everyday",
+    principle: "Split pins block rotation until aligned at a shear line.",
+    complexity: 3,
+    era: "c. 1848",
+    summary:
+      "Inside the lock, spring-loaded pins are cut into two pieces and dropped across the seam between the rotating plug and its housing. With no key, the seam is bridged and the plug is frozen. The correct key raises each stack by exactly the right amount so every split lands on the seam at once — freeing the plug to turn.",
+    steps: [
+      { label: "Locked", text: "Springs push driver pins across the shear line, jamming the plug.", at: 0.0 },
+      { label: "Insert", text: "The key slides in, its peaks and valleys reaching each pin stack.", at: 0.35 },
+      { label: "Align", text: "Each cut lifts its pin so the split sits exactly on the shear line.", at: 0.55 },
+      { label: "Turn", text: "With every gap aligned, the plug rotates and throws the bolt.", at: 0.85 },
+    ],
+    components: [
+      { name: "Plug", note: "The cylinder the key enters and turns." },
+      { name: "Driver pins", note: "Spring-pushed pins that normally block rotation." },
+      { name: "Key pins", note: "Lower pins whose lengths read the key's cuts." },
+      { name: "Shear line", note: "The seam that must be cleared for the plug to turn." },
+    ],
+    facts: [
+      "A typical 5-pin lock has millions of theoretical key cuts — few of which are actually distinct.",
+      "Lock picking exploits tiny machining errors: pins bind one at a time, not all at once.",
+      "Linus Yale Jr. patented the modern flat-key pin-tumbler design in the 1860s.",
+    ],
+    diagram: "pinTumbler",
+  },
+  {
+    id: "cam-follower",
+    index: 4,
+    name: "Cam & Follower",
+    tagline: "A shaped disc choreographs exact linear motion.",
+    category: "Machines",
+    principle: "A profile radius converts angle into precise displacement.",
+    complexity: 2,
+    era: "Medieval",
+    summary:
+      "A cam is a disc whose edge is deliberately not round. As it rotates, a follower resting on that edge is pushed out and let back according to the shape — so the cam is really a motion program carved into metal. Change the profile and you change the timing, giving the same repeatable dance revolution after revolution.",
+    steps: [
+      { label: "Base circle", text: "While the follower rides the round part, it stays still (dwell).", at: 0.1 },
+      { label: "Rise", text: "The lobe sweeps under the follower and lifts it smoothly.", at: 0.4 },
+      { label: "Peak", text: "At the lobe's tip the follower reaches maximum lift.", at: 0.55 },
+      { label: "Return", text: "A spring keeps the follower pressed as the lobe passes and it falls back.", at: 0.8 },
+    ],
+    components: [
+      { name: "Cam", note: "The shaped disc; its outline is the motion plan." },
+      { name: "Follower", note: "Rides the profile and carries the output motion." },
+      { name: "Return spring", note: "Holds contact so the follower tracks the fall." },
+      { name: "Camshaft", note: "Times the cam against the rest of the machine." },
+    ],
+    facts: [
+      "An engine's camshaft is a row of cams opening each valve at just the right instant.",
+      "The 'dwell' — how long the follower stays put — is designed straight into the profile.",
+      "Music boxes and automata use cam banks as a physical, unerasable program.",
+    ],
+    diagram: "camFollower",
+  },
+  {
+    id: "escapement",
+    index: 5,
+    name: "Pendulum Escapement",
+    tagline: "Doles out stored power one measured tick at a time.",
+    category: "Timekeeping",
+    principle: "A steady swing gates a wheel to count equal intervals.",
+    complexity: 4,
+    era: "1657",
+    summary:
+      "A clock's mainspring would unwind in seconds if nothing held it back. The escapement is the gatekeeper: a swinging pendulum lets the toothed escape wheel advance exactly one tooth per swing, and in return the wheel gives the pendulum a tiny nudge to keep it going. That trade is the 'tick-tock' — power out, timekeeping in.",
+    steps: [
+      { label: "Swing", text: "The pendulum sweeps toward one side, its period set by its length.", at: 0.1 },
+      { label: "Release", text: "A pallet lifts off a tooth, letting the escape wheel jump forward.", at: 0.35 },
+      { label: "Impulse", text: "The escaping tooth pushes the pallet, topping up the pendulum's energy.", at: 0.5 },
+      { label: "Catch", text: "The opposite pallet drops in and stops the wheel — one tick counted.", at: 0.8 },
+    ],
+    components: [
+      { name: "Pendulum", note: "Its length fixes the beat; gravity is the restoring force." },
+      { name: "Anchor & pallets", note: "Rock with the pendulum to gate the wheel." },
+      { name: "Escape wheel", note: "Advances one tooth per swing, driven by the spring." },
+      { name: "Mainspring / weight", note: "The stored power the escapement rations out." },
+    ],
+    facts: [
+      "A pendulum's period depends on its length, not its weight — Galileo spotted this in 1602.",
+      "A one-second beat needs a pendulum very close to 0.994 m long.",
+      "Huygens' 1657 pendulum clock cut daily error from ~15 minutes to under 15 seconds.",
+    ],
+    diagram: "escapement",
+  },
+  {
+    id: "dc-motor",
+    index: 6,
+    name: "Brushed DC Motor",
+    tagline: "Flips its own current to keep spinning one way.",
+    category: "Electronics",
+    principle: "A current in a magnetic field feels a sideways force.",
+    complexity: 3,
+    era: "1837",
+    summary:
+      "Run current through a coil sitting between magnets and each side is shoved in opposite directions, twisting the coil. But half a turn later that same push would fight the motion — so a split ring called a commutator swaps the current's direction at exactly that moment. The force always points the way of rotation, and the shaft spins on.",
+    steps: [
+      { label: "Energise", text: "Current enters the coil through the brushes and commutator.", at: 0.05 },
+      { label: "Torque", text: "Each coil side feels an opposite force in the magnets' field, turning it.", at: 0.3 },
+      { label: "Commutate", text: "At the vertical the brushes cross the ring's gap and reverse the current.", at: 0.55 },
+      { label: "Repeat", text: "The reversed current keeps the force aligned with rotation.", at: 0.8 },
+    ],
+    components: [
+      { name: "Armature coil", note: "Carries current and becomes an electromagnet." },
+      { name: "Field magnets", note: "Provide the steady magnetic field to push against." },
+      { name: "Commutator", note: "Split ring that reverses current twice per turn." },
+      { name: "Brushes", note: "Sliding contacts that feed the spinning commutator." },
+    ],
+    facts: [
+      "The force follows the 'left-hand rule': field, current and motion at right angles.",
+      "Reverse the supply leads and a brushed DC motor simply runs backwards.",
+      "Brushes wear because they physically rub — brushless motors move switching into electronics.",
+    ],
+    diagram: "dcMotor",
+  },
+  {
+    id: "hydraulic-press",
+    index: 7,
+    name: "Hydraulic Press",
+    tagline: "A gentle push becomes a crushing force.",
+    category: "Force & Motion",
+    principle: "Pressure in a trapped fluid is equal everywhere (Pascal).",
+    complexity: 2,
+    era: "1795",
+    summary:
+      "Squeeze a confined liquid and the pressure it carries is the same at every point. Apply that pressure to a big piston and a small one, and the big piston feels force in proportion to its larger area. You buy that extra force honestly: the large piston moves only a fraction as far, so the work you put in equals the work you get out.",
+    steps: [
+      { label: "Input", text: "A small force pushes down on the narrow master piston.", at: 0.15 },
+      { label: "Transmit", text: "Pressure spreads unchanged through the fluid to the wide piston.", at: 0.4 },
+      { label: "Multiply", text: "Larger area means larger force — enough to crush or bend the work.", at: 0.6 },
+      { label: "Trade-off", text: "The big piston moves less: distance is lost exactly as force is gained.", at: 0.85 },
+    ],
+    components: [
+      { name: "Master cylinder", note: "The small piston where you apply effort." },
+      { name: "Slave / ram cylinder", note: "The large piston that delivers the force." },
+      { name: "Hydraulic fluid", note: "Nearly incompressible, so it transmits pressure faithfully." },
+      { name: "Connecting line", note: "Carries pressure between the cylinders." },
+    ],
+    facts: [
+      "Force multiplies by the area ratio: a 10× wider ram gives 100× the force.",
+      "Car brakes are hydraulic presses — your foot's push is shared to all four wheels.",
+      "Because liquids barely compress, the response feels instant and firm.",
+    ],
+    diagram: "hydraulic",
+  },
+  {
+    id: "water-cycle",
+    index: 8,
+    name: "The Water Cycle",
+    tagline: "The sun runs Earth's water in an endless loop.",
+    category: "Nature",
+    principle: "Solar heat drives a phase-change engine over the planet.",
+    complexity: 3,
+    era: "Perpetual",
+    summary:
+      "The same water has been circulating for billions of years. Sunlight lifts it from oceans as invisible vapour; rising air cools until the vapour condenses into clouds; when droplets grow heavy they fall as rain or snow; and gravity walks it all back downhill through rivers to the sea. No water is created or destroyed — only moved and reshaped.",
+    steps: [
+      { label: "Evaporation", text: "Solar heat turns surface water into vapour that rises.", at: 0.1 },
+      { label: "Condensation", text: "Higher and cooler, the vapour clumps onto particles to form clouds.", at: 0.4 },
+      { label: "Precipitation", text: "Droplets merge until they are heavy enough to fall as rain or snow.", at: 0.6 },
+      { label: "Collection", text: "Water gathers into rivers and soil and flows back to the ocean.", at: 0.85 },
+    ],
+    components: [
+      { name: "The Sun", note: "The energy source that powers evaporation." },
+      { name: "Oceans & lakes", note: "The vast reservoir most vapour rises from." },
+      { name: "Clouds", note: "Condensed vapour held aloft until droplets grow." },
+      { name: "Rivers & aquifers", note: "The return path back to the sea." },
+    ],
+    facts: [
+      "About 90% of atmospheric moisture evaporates from oceans, seas and lakes.",
+      "A water molecule spends, on average, around nine days in the atmosphere.",
+      "Evaporating one gram of water absorbs roughly 2,260 joules — a huge cooling effect.",
+    ],
+    diagram: "waterCycle",
+  },
+];
+
+export function byId(id: string): Mechanism | undefined {
+  return MECHANISMS.find((m) => m.id === id);
+}
