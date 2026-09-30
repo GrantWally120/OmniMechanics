@@ -183,3 +183,11 @@ test('airfoil: stall model peaks at the stall angle then drops', () => {
   assert.ok(a15 > a14);
   assert.ok(a20.stalled && a20.cl < a15);
 });
+
+test('orbit: a dropped object is a radial orbit with a finite highest point', () => {
+  const el = O.elements({ x: O.RE + 400, y: 0, vx: 0, vy: 0 });
+  assert.equal(el.bound, true);
+  assert.ok(Number.isFinite(el.ra) && Number.isFinite(el.rp));
+  near(el.ra, O.RE + 400, 1, 'it only rises as high as it started');
+  assert.equal(el.rp, 0);
+});

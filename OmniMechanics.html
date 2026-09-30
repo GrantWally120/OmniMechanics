@@ -138,6 +138,8 @@ code { background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 2p
 button { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* Headings and <main> are only focused by script after a page change, so they need no ring. */
+[tabindex="-1"]:focus, [tabindex="-1"]:focus-visible { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 8px 14px; font-weight: 700; }
 .skip:focus { left: 8px; }
@@ -212,12 +214,17 @@ button { font: inherit; color: inherit; }
   .menu-btn { display: inline-flex; }
   .brand { margin-right: auto; }
 }
-@media (max-width: 520px) {
+@media (max-width: 639px) {
+  .top-nav { display: none; }
   .hbtn-lbl { display: none; }
   .hbtn { padding: 0 10px; }
-  .top-nav a { padding: 8px 8px; }
   .brand-name { font-size: 15px; }
+  .header-in { gap: var(--space-3); }
 }
+@media (max-width: 359px) { .brand-name { display: none; } }
+.rail-top { display: none; margin-bottom: var(--space-6); gap: 2px; }
+.rail-top a { grid-template-columns: 1fr; font-weight: 700; font-stretch: 108%; }
+@media (max-width: 639px) { .rail-top { display: grid; } }
 
 /* ---------------------------------------------------------------- hero */
 .hero { display: grid; gap: var(--space-8); align-items: center; padding-bottom: var(--space-12); }
@@ -1883,8 +1890,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
     const bound = eps < 0;
     const a = bound ? -GM / (2 * eps) : Infinity;
     const p = (h * h) / GM;
-    const rp = p / (1 + e);
-    const ra = bound ? p / (1 - e) : Infinity;
+    const radial = p < 1e-9; // dropped straight down: a degenerate ellipse
+    const rp = radial ? 0 : p / (1 + e);
+    const ra = bound ? (radial ? 2 * a : p / (1 - e)) : Infinity;
     return {
       r, v: Math.sqrt(v2), eps, h, e, ex, ey, bound, a, p, rp, ra,
       period: bound ? 2 * Math.PI * Math.sqrt((a * a * a) / GM) : Infinity,
@@ -3544,7 +3552,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         if (!V.thumb) {
           const I = L.info;
           const msg = host.ctl.turn && !ls.free && st.s >= 0.98 ? 'A pin crosses the shear line.' : st.s < 0.98 ? 'Slide the key all the way in.' : ls.free ? (host.ctl.turn ? 'Every pin on the line.' : 'Now turn the key.') : 'Not every pin is on the line.';
-          text(g, V, msg, V.narrow ? F.cx + F.R + 14 : F.cx, V.narrow ? F.cy + 6 : F.cy + F.R + 44, { px: 12, color: c.ink, align: V.narrow ? 'left' : 'center', weight: 600 });
+          text(g, V, msg, V.narrow ? F.cx + F.R + 14 : F.cx, V.narrow ? F.cy + 44 : F.cy + F.R + 44, { px: 12, color: c.ink, align: V.narrow ? 'left' : 'center', weight: 600 });
           if (!V.narrow) text(g, V, 'Drag the key sideways.', F.cx, F.cy + F.R + 62, { px: 11, color: c.ink2, align: 'center' });
         }
       }
@@ -5409,7 +5417,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         caption() {
           solve();
           if (host.ctl.n < 3) return 'Not enough satellites';
-          return host.ctl.mode === 'solve' ? (st.k < st.sol.path.length - 1 ? 'Solver working…' : 'Circles meet') : 'Clock error ignored';
+          return host.ctl.mode === 'solve' ? (st.sol.ok && st.k < st.sol.path.length - 1 ? 'Solver working…' : 'Circles meet') : 'Clock error ignored';
         },
         describe() { solve(); return host.ctl.n < 3 ? 'Only two satellites. Not enough to find a position and the clock error.' : 'Position error ' + fmt(errOf(host.ctl.mode === 'solve' ? st.sol : st.raw), 2) + ' units.'; },
 
@@ -5431,7 +5439,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
           let est = null, bk = 0;
           if (solve_) {
             const pth = st.sol.path;
-            const k0 = Math.floor(st.k), k1 = Math.min(pth.length - 1, k0 + 1), f = st.k - k0;
+            const kk = Math.min(pth.length - 1, st.k);
+            const k0 = Math.floor(kk), k1 = Math.min(pth.length - 1, k0 + 1), f = kk - k0;
             est = { x: pth[k0].x + (pth[k1].x - pth[k0].x) * f, y: pth[k0].y + (pth[k1].y - pth[k0].y) * f };
             bk = pth[k0].b + (pth[k1].b - pth[k0].b) * f;
           }
@@ -5492,7 +5501,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         for (let i = 0; i < rows; i++) {
           const y = T.y + 44 + i * 19;
           const p = path[i];
-          const active = Math.floor(st.k) === i && host.ctl.mode === 'solve';
+          const active = Math.floor(Math.min(path.length - 1, st.k)) === i && host.ctl.mode === 'solve';
           if (active) { g.fillStyle = alpha(c.accent, 0.55); g.fillRect(T.x - 4, y - 13, T.w + 6, 18); }
           let ss = 0;
           st.sats.forEach((s, j) => { const d = Math.hypot(p.x - s.x, p.y - s.y); ss += Math.pow(st.rho[j] - d - p.b, 2); });
@@ -5582,7 +5591,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
     },
 
     create(host) {
-      const st = { s: null, trail: [], status: 'flying', t: 0, cool: 0, pred: [], predKey: '', lastTrail: 0, crashAt: null, el: null };
+      const st = { s: null, trail: [], status: 'flying', t: 0, cool: 0, pred: [], predKey: '', lastTrail: 0, crashAt: null };
+      let elem = null; // orbital elements (infinite for escape orbits, so kept out of the plain-number state)
       let L = null;
 
       const launch = () => {
@@ -5591,7 +5601,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
       };
       function fire() {
         st.s = launch(); st.trail = [[st.s.x, st.s.y]]; st.status = 'flying'; st.t = 0; st.cool = 0; st.lastTrail = 0; st.crashAt = null;
-        st.el = Ob.elements(st.s);
+        elem = Ob.elements(st.s);
         computePred();
       }
       function computePred() {
@@ -5647,7 +5657,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         action(id) { if (id === 'fire') fire(); },
         readouts() {
           const c = host.ctl, r0 = R + c.alt;
-          const el = st.el || Ob.elements(launch());
+          const el = elem || Ob.elements(launch());
           const res = result(el);
           const g = Ob.gAt(c.alt);
           return [
@@ -5661,8 +5671,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
             { k: 'Flight time', v: fmt(st.t / 60, 0) + ' min' },
           ];
         },
-        caption() { return st.status === 'crashed' ? 'Hit the ground' : st.status === 'escaped' ? 'Gone for good' : result(st.el || Ob.elements(launch())); },
-        describe() { const el = st.el || Ob.elements(launch()); return result(el) + '. Launched at ' + fmt(host.ctl.speed, 2) + ' kilometres per second from ' + host.ctl.alt + ' kilometres up.'; },
+        caption() { return st.status === 'crashed' ? 'Hit the ground' : st.status === 'escaped' ? 'Gone for good' : result(elem || Ob.elements(launch())); },
+        describe() { const el = elem || Ob.elements(launch()); return result(el) + '. Launched at ' + fmt(host.ctl.speed, 2) + ' kilometres per second from ' + host.ctl.alt + ' kilometres up.'; },
 
         draw(g, V, c) {
           const M = L.map, cx = M.x + M.w / 2, cy = M.y + M.h / 2;
@@ -6393,6 +6403,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         themeBtn));
 
     railEl = h('nav', { class: 'rail', id: 'rail', 'aria-label': 'Mechanisms' });
+    railEl.appendChild(h('div', { class: 'rail-top' },
+      h('a', { href: '#', on: { click: () => toggleRail(false) } }, h('span', { class: 'rail-t', text: 'Library' })),
+      h('a', { href: '#about', on: { click: () => toggleRail(false) } }, h('span', { class: 'rail-t', text: 'About' }))));
     OM.groups.forEach((g) => {
       const list = OM.mods.filter((m) => m.group === g.id);
       if (!list.length) return;

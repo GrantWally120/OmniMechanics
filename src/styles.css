@@ -127,6 +127,8 @@ code { background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 2p
 button { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* Headings and <main> are only focused by script after a page change, so they need no ring. */
+[tabindex="-1"]:focus, [tabindex="-1"]:focus-visible { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 8px 14px; font-weight: 700; }
 .skip:focus { left: 8px; }
@@ -201,12 +203,17 @@ button { font: inherit; color: inherit; }
   .menu-btn { display: inline-flex; }
   .brand { margin-right: auto; }
 }
-@media (max-width: 520px) {
+@media (max-width: 639px) {
+  .top-nav { display: none; }
   .hbtn-lbl { display: none; }
   .hbtn { padding: 0 10px; }
-  .top-nav a { padding: 8px 8px; }
   .brand-name { font-size: 15px; }
+  .header-in { gap: var(--space-3); }
 }
+@media (max-width: 359px) { .brand-name { display: none; } }
+.rail-top { display: none; margin-bottom: var(--space-6); gap: 2px; }
+.rail-top a { grid-template-columns: 1fr; font-weight: 700; font-stretch: 108%; }
+@media (max-width: 639px) { .rail-top { display: grid; } }
 
 /* ---------------------------------------------------------------- hero */
 .hero { display: grid; gap: var(--space-8); align-items: center; padding-bottom: var(--space-12); }

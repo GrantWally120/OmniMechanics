@@ -67,7 +67,8 @@
     },
 
     create(host) {
-      const st = { s: null, trail: [], status: 'flying', t: 0, cool: 0, pred: [], predKey: '', lastTrail: 0, crashAt: null, el: null };
+      const st = { s: null, trail: [], status: 'flying', t: 0, cool: 0, pred: [], predKey: '', lastTrail: 0, crashAt: null };
+      let elem = null; // orbital elements (infinite for escape orbits, so kept out of the plain-number state)
       let L = null;
 
       const launch = () => {
@@ -76,7 +77,7 @@
       };
       function fire() {
         st.s = launch(); st.trail = [[st.s.x, st.s.y]]; st.status = 'flying'; st.t = 0; st.cool = 0; st.lastTrail = 0; st.crashAt = null;
-        st.el = Ob.elements(st.s);
+        elem = Ob.elements(st.s);
         computePred();
       }
       function computePred() {
@@ -132,7 +133,7 @@
         action(id) { if (id === 'fire') fire(); },
         readouts() {
           const c = host.ctl, r0 = R + c.alt;
-          const el = st.el || Ob.elements(launch());
+          const el = elem || Ob.elements(launch());
           const res = result(el);
           const g = Ob.gAt(c.alt);
           return [
@@ -146,8 +147,8 @@
             { k: 'Flight time', v: fmt(st.t / 60, 0) + ' min' },
           ];
         },
-        caption() { return st.status === 'crashed' ? 'Hit the ground' : st.status === 'escaped' ? 'Gone for good' : result(st.el || Ob.elements(launch())); },
-        describe() { const el = st.el || Ob.elements(launch()); return result(el) + '. Launched at ' + fmt(host.ctl.speed, 2) + ' kilometres per second from ' + host.ctl.alt + ' kilometres up.'; },
+        caption() { return st.status === 'crashed' ? 'Hit the ground' : st.status === 'escaped' ? 'Gone for good' : result(elem || Ob.elements(launch())); },
+        describe() { const el = elem || Ob.elements(launch()); return result(el) + '. Launched at ' + fmt(host.ctl.speed, 2) + ' kilometres per second from ' + host.ctl.alt + ' kilometres up.'; },
 
         draw(g, V, c) {
           const M = L.map, cx = M.x + M.w / 2, cy = M.y + M.h / 2;

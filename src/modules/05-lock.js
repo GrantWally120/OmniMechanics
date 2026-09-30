@@ -297,7 +297,7 @@
         if (!V.thumb) {
           const I = L.info;
           const msg = host.ctl.turn && !ls.free && st.s >= 0.98 ? 'A pin crosses the shear line.' : st.s < 0.98 ? 'Slide the key all the way in.' : ls.free ? (host.ctl.turn ? 'Every pin on the line.' : 'Now turn the key.') : 'Not every pin is on the line.';
-          text(g, V, msg, V.narrow ? F.cx + F.R + 14 : F.cx, V.narrow ? F.cy + 6 : F.cy + F.R + 44, { px: 12, color: c.ink, align: V.narrow ? 'left' : 'center', weight: 600 });
+          text(g, V, msg, V.narrow ? F.cx + F.R + 14 : F.cx, V.narrow ? F.cy + 44 : F.cy + F.R + 44, { px: 12, color: c.ink, align: V.narrow ? 'left' : 'center', weight: 600 });
           if (!V.narrow) text(g, V, 'Drag the key sideways.', F.cx, F.cy + F.R + 62, { px: 11, color: c.ink2, align: 'center' });
         }
       }

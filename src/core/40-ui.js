@@ -86,6 +86,9 @@
         themeBtn));
 
     railEl = h('nav', { class: 'rail', id: 'rail', 'aria-label': 'Mechanisms' });
+    railEl.appendChild(h('div', { class: 'rail-top' },
+      h('a', { href: '#', on: { click: () => toggleRail(false) } }, h('span', { class: 'rail-t', text: 'Library' })),
+      h('a', { href: '#about', on: { click: () => toggleRail(false) } }, h('span', { class: 'rail-t', text: 'About' }))));
     OM.groups.forEach((g) => {
       const list = OM.mods.filter((m) => m.group === g.id);
       if (!list.length) return;

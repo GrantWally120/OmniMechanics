@@ -56,8 +56,9 @@
     const bound = eps < 0;
     const a = bound ? -GM / (2 * eps) : Infinity;
     const p = (h * h) / GM;
-    const rp = p / (1 + e);
-    const ra = bound ? p / (1 - e) : Infinity;
+    const radial = p < 1e-9; // dropped straight down: a degenerate ellipse
+    const rp = radial ? 0 : p / (1 + e);
+    const ra = bound ? (radial ? 2 * a : p / (1 - e)) : Infinity;
     return {
       r, v: Math.sqrt(v2), eps, h, e, ex, ey, bound, a, p, rp, ra,
       period: bound ? 2 * Math.PI * Math.sqrt((a * a * a) / GM) : Infinity,

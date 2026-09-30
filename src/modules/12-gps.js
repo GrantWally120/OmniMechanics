@@ -135,7 +135,7 @@
         caption() {
           solve();
           if (host.ctl.n < 3) return 'Not enough satellites';
-          return host.ctl.mode === 'solve' ? (st.k < st.sol.path.length - 1 ? 'Solver working…' : 'Circles meet') : 'Clock error ignored';
+          return host.ctl.mode === 'solve' ? (st.sol.ok && st.k < st.sol.path.length - 1 ? 'Solver working…' : 'Circles meet') : 'Clock error ignored';
         },
         describe() { solve(); return host.ctl.n < 3 ? 'Only two satellites. Not enough to find a position and the clock error.' : 'Position error ' + fmt(errOf(host.ctl.mode === 'solve' ? st.sol : st.raw), 2) + ' units.'; },
 
@@ -157,7 +157,8 @@
           let est = null, bk = 0;
           if (solve_) {
             const pth = st.sol.path;
-            const k0 = Math.floor(st.k), k1 = Math.min(pth.length - 1, k0 + 1), f = st.k - k0;
+            const kk = Math.min(pth.length - 1, st.k);
+            const k0 = Math.floor(kk), k1 = Math.min(pth.length - 1, k0 + 1), f = kk - k0;
             est = { x: pth[k0].x + (pth[k1].x - pth[k0].x) * f, y: pth[k0].y + (pth[k1].y - pth[k0].y) * f };
             bk = pth[k0].b + (pth[k1].b - pth[k0].b) * f;
           }
@@ -218,7 +219,7 @@
         for (let i = 0; i < rows; i++) {
           const y = T.y + 44 + i * 19;
           const p = path[i];
-          const active = Math.floor(st.k) === i && host.ctl.mode === 'solve';
+          const active = Math.floor(Math.min(path.length - 1, st.k)) === i && host.ctl.mode === 'solve';
           if (active) { g.fillStyle = alpha(c.accent, 0.55); g.fillRect(T.x - 4, y - 13, T.w + 6, 18); }
           let ss = 0;
           st.sats.forEach((s, j) => { const d = Math.hypot(p.x - s.x, p.y - s.y); ss += Math.pow(st.rho[j] - d - p.b, 2); });
