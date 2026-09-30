@@ -657,13 +657,41 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
   }
 
   // Text at a constant CSS pixel size. o: {px, color, align, base, weight, mono, halo}
+  // The label is measured and, if it would run off the canvas, shrunk (down to 74%)
+  // and then nudged back inside, so nothing is ever clipped at an edge.
   function text(g, V, s, x, y, o) {
     if (V.thumb) return;
     o = o || {};
-    const px = o.px || 12;
-    g.font = `${o.weight || 500} ${px / V.s}px ${o.mono ? OM.theme.mono : OM.theme.font}`;
-    g.textAlign = o.align || 'left';
+    let px = o.px || 12;
+    const fam = o.mono ? OM.theme.mono : OM.theme.font;
+    const wgt = o.weight || 500;
+    const align = o.align || 'left';
+    g.font = `${wgt} ${px / V.s}px ${fam}`;
+    g.textAlign = align;
     g.textBaseline = o.base || 'alphabetic';
+    if (V.cw && g.getTransform) {
+      const t = g.getTransform();
+      const k = t.a / V.dpr; // CSS pixels per drawing unit
+      let w = g.measureText(s).width * k;
+      const sx = (t.a * x + t.e) / V.dpr;
+      const span = () => {
+        const left = align === 'left' ? sx : align === 'right' ? sx - w : sx - w / 2;
+        return [left, left + w];
+      };
+      let [l, r] = span();
+      if (l < 2 || r > V.cw - 2) {
+        const room = align === 'left' ? V.cw - 2 - sx : align === 'right' ? sx - 2 : 2 * Math.min(sx - 2, V.cw - 2 - sx);
+        const f = Math.max(0.74, Math.min(1, room / w));
+        if (f < 1) {
+          px *= f; w *= f;
+          g.font = `${wgt} ${px / V.s}px ${fam}`;
+          [l, r] = span();
+        }
+        let dx = 0;
+        if (l < 2) dx = 2 - l; else if (r > V.cw - 2) dx = V.cw - 2 - r;
+        if (dx) x += (dx * V.dpr) / t.a;
+      }
+    }
     if (o.halo !== false) {
       g.lineJoin = 'round';
       g.lineWidth = 3.5 / V.s;
@@ -1555,6 +1583,30 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
     return { ok: true, x, y, b, path, rms: Math.sqrt(ss / n), pdop };
   }
 
+  // Position only, pretending the receiver clock is perfect (b = 0). Shows the price of ignoring it.
+  function solveXY(sats, rho, guess) {
+    const n = sats.length;
+    if (n < 2) return null;
+    let x = guess ? guess.x : sats.reduce((s, p) => s + p.x, 0) / n;
+    let y = guess ? guess.y : sats.reduce((s, p) => s + p.y, 0) / n;
+    for (let it = 0; it < 40; it++) {
+      let a = 0, b = 0, d = 0, g1 = 0, g2 = 0;
+      for (let i = 0; i < n; i++) {
+        const dx = x - sats[i].x, dy = y - sats[i].y;
+        const r = Math.max(1e-9, Math.hypot(dx, dy));
+        const jx = dx / r, jy = dy / r, res = rho[i] - r;
+        a += jx * jx; b += jx * jy; d += jy * jy; g1 += jx * res; g2 += jy * res;
+      }
+      a += 1e-6; d += 1e-6;
+      const det = a * d - b * b;
+      if (Math.abs(det) < 1e-12) break;
+      const sx = (d * g1 - b * g2) / det, sy = (-b * g1 + a * g2) / det;
+      x += sx; y += sy;
+      if (Math.abs(sx) + Math.abs(sy) < 1e-9) break;
+    }
+    return { x, y };
+  }
+
   function pseudoranges(sats, pos, bias, noise) {
     return sats.map((s, i) => Math.hypot(pos.x - s.x, pos.y - s.y) + bias + (noise ? noise[i] : 0));
   }
@@ -1563,7 +1615,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
   const REL = { gravity: 45.7e-6, velocity: -7.2e-6, perDay: 38.5e-6 };
   const driftKmPerDay = REL.perDay * C / 1000;
 
-  const api = { C, solve, pseudoranges, REL, driftKmPerDay };
+  const api = { C, solve, solveXY, pseudoranges, REL, driftKmPerDay };
   OM.gps = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
@@ -3802,7 +3854,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
       { id: 'ns', type: 'range', label: 'Secondary turns', min: 5, max: 800, step: 1, value: 10 },
       { id: 'rload', type: 'range', label: 'Load resistance', min: 1, max: 500, step: 1, value: 10, unit: 'Ω' },
       { id: 'f', type: 'seg', label: 'Mains frequency', value: 60, options: [{ v: 50, l: '50 Hz' }, { v: 60, l: '60 Hz' }], showIf: (c) => c.src === 'ac', hint: 'Cebu and the rest of the Philippines use 60 Hz.' },
-      { id: 'scope', type: 'seg', label: 'Voltage plot', value: 'fit', options: [{ v: 'fit', l: 'Fit each' }, { v: 'same', l: 'Same scale' }] },
+      { id: 'scope', type: 'seg', label: 'Voltage plot', value: 'same', options: [{ v: 'same', l: 'Same scale' }, { v: 'fit', l: 'Fit each' }] },
       { id: 'dcgo', type: 'button', label: 'Switch the DC on again', primary: true, playOnClick: true, showIf: (c) => c.src === 'dc' },
     ],
     content: {
@@ -3985,7 +4037,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         g.beginPath(); g.moveTo(sx, sy - 20); g.lineTo(sx, 50); g.lineTo(110, 50); g.lineTo(110, 92);
         g.moveTo(sx, sy + 20); g.lineTo(sx, 274); g.lineTo(110 + 0, 274); g.lineTo(110, 232); g.stroke();
         g.fillStyle = alpha(c.hot, 0.001);
-        text(g, V, fmt(host.ctl.vrms, 0) + ' V' + (isDC() ? ' DC' : ' AC'), sx, sy - 30, { px: 12, weight: 800, mono: true, align: 'center', color: c.hot });
+        text(g, V, fmt(host.ctl.vrms, 0) + ' V' + (isDC() ? ' DC' : ' AC'), 4, sy - 30, { px: 12, weight: 800, mono: true, align: 'left', color: c.hot });
         // load lamp
         const lx = 372, ly = 160;
         const lit = isDC() ? clamp(dcNow().v2 / 12, 0, 1) * 0.6 : clamp(a.pOut / 40, 0, 1);
@@ -4016,7 +4068,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
       }
 
       function drawVolts(g, V, c) {
-        const f = frame(g, V, c, L.v, 'Voltage on each side', isDC() ? 'time, milliseconds (from switch-on)' : 'time, two mains cycles');
+        const f = frame(g, V, c, L.v, 'Voltage on each side', isDC() ? 'time, milliseconds (from switch-on)' : (host.ctl.scope === 'same' ? 'time, two mains cycles' : 'time, two mains cycles (each wave to its own scale)'));
         const a = an();
         const dc = isDC();
         const p1 = dc ? host.ctl.vrms : SQ2 * host.ctl.vrms;
@@ -4040,8 +4092,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
           curve((u) => (u > 0.005 ? p1 : 0), s1, c.hot, 2.2);
           curve((u) => { const d = Tf.dcStep({ v: host.ctl.vrms, np: host.ctl.np, ns: host.ctl.ns, tSince: Math.max(1e-6, u * DC_SPAN) }); return u > 0.005 ? d.v2 : 0; }, s2, c.cold, 2.2);
         } else {
-          curve((u) => p1 * Math.sin(u * 4 * Math.PI), s1, c.hot, 2.2);
-          curve((u) => p2 * Math.sin(u * 4 * Math.PI), s2, c.cold, 2.2);
+          curve((u) => p1 * Math.sin(u * 4 * Math.PI), s1, c.hot, same ? 2.4 : 5);
+          curve((u) => p2 * Math.sin(u * 4 * Math.PI), s2, c.cold, 2.4);
         }
         const cur = dc ? clamp(st.dc / DC_SPAN, 0, 1) : (st.cyc * host.ctl.f ? (st.cyc % 2) / 2 : 0);
         const cx = X(dc ? cur : ((st.cyc % 2) / 2));
@@ -4049,7 +4101,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         g.fillStyle = c.accent; g.beginPath(); g.moveTo(cx - V.px(5), f.y0 - V.px(7)); g.lineTo(cx + V.px(5), f.y0 - V.px(7)); g.lineTo(cx, f.y0 - 1); g.closePath(); g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(1.2); g.stroke();
         text(g, V, 'primary ' + fmt(p1, 0) + ' V' + (dc ? '' : ' peak'), f.x0 + 6, f.y0 + 14, { px: 11, weight: 800, color: c.hot });
         text(g, V, 'secondary ' + fmt(p2, p2 < 10 ? 1 : 0) + ' V' + (dc ? ' at first' : ' peak'), f.x0 + 6, f.y0 + f.h - 8, { px: 11, weight: 800, color: c.cold });
-        if (!same && !dc) text(g, V, 'each wave drawn to its own scale', f.x0 + f.w - 6, f.y0 + 14, { px: 10, color: c.ink2, align: 'right', halo: false });
         if (dc) for (const ms of [0, 5, 10, 15, 20]) text(g, V, String(ms), X(ms / 20), f.y0 + f.h + 13, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false });
       }
 
@@ -4077,6 +4128,1643 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         line(g, V, cx, f.y0, cx, f.y0 + f.h, c.ink, 1.5);
         if (!dc) text(g, V, 'peak ' + fmt(a.bMax, 2) + ' T' + (a.saturated ? '  saturated' : ''), f.x0 + 6, f.y0 + f.h - 6, { px: 11, weight: 800, color: a.saturated ? c.bad : c.cold });
         else text(g, V, dcNow().saturated ? 'saturated, flux stops changing' : 'rising at V ÷ N', f.x0 + 6, f.y0 + f.h - 6, { px: 11, weight: 800, color: dcNow().saturated ? c.bad : c.cold });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/08-adder.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Lg = OM.logic;
+  const { clamp } = OM.util;
+  const { text, alpha } = OM.gfx;
+
+  const DELAY = 0.5; // seconds of drawing time per gate-delay stage
+
+  OM.register({
+    id: 'adder',
+    title: 'Adding with logic gates',
+    group: 'electric',
+    hook: 'Computers do not know numbers. A few gates turn patterns of high and low voltages into the sum of two numbers.',
+    units: 'bits (1 = high, 0 = low)',
+    alt: 'Four full adders chained together with carry wires, and a gate-level diagram of one full adder built from two XOR gates, two AND gates and an OR gate.',
+    controls: [
+      { id: 'a', type: 'range', label: 'Number A', min: 0, max: 15, step: 1, value: 11, fmt: (v) => v.toString(2).padStart(4, '0') + '  =  ' + v, hint: 'Or click the bits in the drawing.' },
+      { id: 'b', type: 'range', label: 'Number B', min: 0, max: 15, step: 1, value: 6, fmt: (v) => v.toString(2).padStart(4, '0') + '  =  ' + v },
+      { id: 'cin', type: 'toggle', label: 'Carry in (C in)', value: false },
+      { id: 'stage', type: 'seg', label: 'Gates of column', value: 0, options: [{ v: 3, l: 'Bit 3' }, { v: 2, l: 'Bit 2' }, { v: 1, l: 'Bit 1' }, { v: 0, l: 'Bit 0' }] },
+      { id: 'delay', type: 'toggle', label: 'Show the gate delay', value: true, hint: 'Change a number and watch the carry ripple from right to left.' },
+    ],
+    content: {
+      intro: 'A computer adds with gates. Feed two bits into an XOR gate and out comes the sum bit. An AND gate spots when a carry is needed. Chain four of these columns and you can add numbers up to 15.',
+      steps: [
+        { h: 'Bits are wires', p: 'A binary digit is a wire that is either high (1) or low (0). The bits 1011 stand for 8 + 0 + 2 + 1 = 11.' },
+        { h: 'One column of addition', p: 'Add two bits and the carry arriving from the column on the right. The sum bit is 1 when an odd number of the three inputs is 1. The carry out is 1 when two or more are. Five gates do both.' },
+        { h: 'Chain the columns', p: 'Each column passes its carry out to the next column’s carry in. Four columns make a 4-bit ripple-carry adder.' },
+        { h: 'The carry has to ripple', p: 'Gates take time to settle. The top bit cannot be right until the carry has passed through every column below it. Switch on the gate delay and change a number to see it.' },
+      ],
+      principle: {
+        lead: 'Arithmetic is just patterns. Logic gates turn patterns of high and low voltages into other patterns, and we agree to read those patterns as numbers.',
+        eqs: [
+          { label: 'Sum bit of one column', eq: 'S = A ⊕ B ⊕ C~in~', note: '⊕ is XOR: 1 when an odd number of inputs are 1.' },
+          { label: 'Carry out of one column', eq: 'C~out~ = A·B + C~in~·(A ⊕ B)', note: 'A·B is AND and + is OR. A carry is made when A and B are both 1, or when an incoming carry meets a column that adds to 1.' },
+          { label: 'Value of the bits', eq: 'value = 8 b~3~ + 4 b~2~ + 2 b~1~ + b~0~' },
+        ],
+        points: [
+          'Take away the carry input and two gates are left: the **half adder**. It is an XOR for the sum and an AND for the carry.',
+          'Real processors avoid a long ripple. A carry-lookahead adder works out all the carries at once from the inputs, so a 64-bit add takes only a few gate delays.',
+          '**What this model leaves out:** real gate delays differ and signals glitch before they settle. Here every column takes the same time.',
+        ],
+      },
+      myth: {
+        claim: 'A computer understands numbers and does arithmetic.',
+        truth: 'A computer has no idea what a number is. Switches and gates turn one pattern of voltages into another pattern, and the designers arranged it so that, read as binary, the new pattern is the sum.',
+      },
+      tries: [
+        { label: '1 + 1', text: 'The smallest carry.', set: { a: 1, b: 1, cin: false, stage: 0 } },
+        { label: '7 + 8', text: 'No carries at all, so nothing ripples.', set: { a: 7, b: 8, cin: false } },
+        { label: '15 + 1', text: 'The carry has to ripple through every column and out the top.', set: { a: 15, b: 1, cin: false, stage: 3 } },
+        { label: '15 + 15 + carry in', text: 'The biggest sum a 4-bit adder can make: 31.', set: { a: 15, b: 15, cin: true } },
+      ],
+      quiz: [
+        { q: 'What is 1011 in binary?', opts: ['9', '10', '11', '13'], a: 2, why: '8 + 0 + 2 + 1 = 11.' },
+        { q: 'Which gate gives the sum bit when you add two bits (ignoring any carry)?', opts: ['AND', 'OR', 'XOR', 'NOT'], a: 2, why: 'XOR is 1 when exactly one input is 1. 0+0 is 0, 0+1 and 1+0 are 1, and 1+1 is 0 with a carry.' },
+        { q: 'Why is the top bit of a ripple-carry adder the last to settle?', opts: ['It has the most gates', 'Its carry input has to travel through all the columns below it first', 'It is the biggest number', 'Its wires are longer'], a: 1, why: 'Each column must wait for the carry from the column before it, so the delay grows with the number of bits.' },
+      ],
+      sources: [
+        'D. M. Harris and S. L. Harris, *Digital Design and Computer Architecture*, Morgan Kaufmann.',
+      ],
+    },
+
+    create(host) {
+      const st = { t: 0, t0: -10, disp: null, last: '' };
+      let L = null;
+      let hits = [];
+
+      const inputs = () => ({ A: Lg.toBits(host.ctl.a, 4), B: Lg.toBits(host.ctl.b, 4), cin: host.ctl.cin ? 1 : 0 });
+      const cur = () => { const i = inputs(); return Lg.add(i.A, i.B, i.cin); };
+      const key = () => host.ctl.a + ',' + host.ctl.b + ',' + (host.ctl.cin ? 1 : 0);
+
+      function sync() {
+        const c = cur();
+        if (!st.disp) st.disp = c.stages.map((s) => Object.assign({}, s));
+        if (!host.ctl.delay) { st.disp = c.stages.map((s) => Object.assign({}, s)); return; }
+        const el = st.t - st.t0;
+        c.stages.forEach((s, i) => { if (el >= (i + 1) * DELAY) st.disp[i] = Object.assign({}, s); });
+      }
+
+      const sim = {
+        ref: { w: 780, h: 500 },
+        refNarrow: { w: 420, h: 480 },
+        state: st,
+        init() { st.t = 0; st.t0 = -10; st.disp = null; st.last = key(); sync(); },
+        layout(V) {
+          L = V.narrow
+            ? { ov: { x: 6, y: 6, bw: 88, gap: 10, top: 20 }, gl: { x: 14, y: 300, k: 0.54 } }
+            : { ov: { x: 70, y: 8, bw: 120, gap: 34, top: 26 }, gl: { x: 20, y: 250, k: 1 } };
+        },
+        step(dt) {
+          st.t += dt;
+          if (key() !== st.last) { st.last = key(); st.t0 = st.t; }
+          sync();
+        },
+        onControl() { if (key() !== st.last) { st.last = key(); st.t0 = st.t; } sync(); },
+        thumb() { st.disp = cur().stages.map((s) => Object.assign({}, s)); st.t0 = -10; },
+        pointer(type, x, y) {
+          if (type !== 'down') return false;
+          for (const h of hits) {
+            if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
+              if (h.kind === 'a') host.set('a', host.ctl.a ^ (1 << h.i));
+              else if (h.kind === 'b') host.set('b', host.ctl.b ^ (1 << h.i));
+              else if (h.kind === 'cin') host.set('cin', !host.ctl.cin);
+              else if (h.kind === 'stage') host.set('stage', h.i);
+              return false;
+            }
+          }
+          return false;
+        },
+        cursor(x, y) { return hits.some((h) => x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) ? 'pointer' : ''; },
+        readouts() {
+          const c = cur();
+          const val = Lg.toInt(c.sum) + (c.cout << 4);
+          const settled = st.disp.every((s, i) => s.s === c.stages[i].s && s.cout === c.stages[i].cout);
+          let run = 0, best = 0;
+          c.stages.forEach((s) => { if (s.cout) { run++; best = Math.max(best, run); } else run = 0; });
+          return [
+            { k: 'A', v: host.ctl.a.toString(2).padStart(4, '0') + ' = ' + host.ctl.a },
+            { k: 'B', v: host.ctl.b.toString(2).padStart(4, '0') + ' = ' + host.ctl.b },
+            { k: 'Sum', v: (c.cout ? '1 ' : '0 ') + c.sum.slice().reverse().join('') + ' = ' + val },
+            { k: 'Check', v: host.ctl.a + ' + ' + host.ctl.b + (host.ctl.cin ? ' + 1' : '') + ' = ' + (host.ctl.a + host.ctl.b + (host.ctl.cin ? 1 : 0)), tone: val === host.ctl.a + host.ctl.b + (host.ctl.cin ? 1 : 0) ? 'good' : 'bad' },
+            { k: 'Carry out', v: c.cout ? '1 (overflow)' : '0', tone: c.cout ? 'warn' : '' },
+            { k: 'Carry ripple', v: best + ' of 4 columns' },
+            { k: 'Output', v: settled ? 'settled' : 'settling…', tone: settled ? 'good' : 'warn' },
+          ];
+        },
+        caption() { const c = cur(); const settled = st.disp.every((s, i) => s.s === c.stages[i].s && s.cout === c.stages[i].cout); return settled ? 'Settled' : 'Carry rippling…'; },
+        describe() { const c = cur(); return host.ctl.a + ' plus ' + host.ctl.b + ' equals ' + (Lg.toInt(c.sum) + (c.cout << 4)) + '.'; },
+
+        draw(g, V, c) {
+          hits = [];
+          drawOverview(g, V, c);
+          if (!V.thumb) drawGates(g, V, c);
+        },
+      };
+
+      const col = (c, v) => (v ? c.elec : c.ink3);
+      function wire(g, V, c, pts, v, wpx) {
+        g.strokeStyle = col(c, v); g.lineWidth = V.px(v ? (wpx || 3.2) : 2); g.lineJoin = 'round'; g.lineCap = 'round';
+        g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.stroke();
+      }
+      function bitBox(g, V, c, x, y, w, h, v, label, hit, below) {
+        g.fillStyle = v ? alpha(c.elec, 0.85) : c.paper2; g.fillRect(x, y, w, h);
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.8); g.strokeRect(x, y, w, h);
+        text(g, V, String(v), x + w / 2, y + h / 2 + 5, { px: 15, weight: 800, mono: true, align: 'center', color: v ? c.paper2 : c.ink, halo: false });
+        if (label) text(g, V, label, x + w / 2, y + (below ? h + 13 : -6), { px: 10.5, color: c.ink2, align: 'center', halo: false, mono: true });
+        if (hit) hits.push(Object.assign({ x, y, w, h }, hit));
+      }
+
+      function drawOverview(g, V, c) {
+        const o = L.ov;
+        const I = inputs();
+        const box = (i) => o.x + (3 - i) * (o.bw + o.gap);
+        const y0 = o.y + o.top + 50, bh = 66;
+        text(g, V, V.narrow ? 'Four full adders, one per bit' : 'A 4-bit ripple-carry adder: four full adders in a row', o.x - (V.narrow ? 0 : 56), o.y + 12, { px: 12, weight: 700, halo: false });
+        for (let i = 3; i >= 0; i--) {
+          const x = box(i), s = st.disp[i];
+          const sel = host.ctl.stage === i;
+          // inputs and sum
+          bitBox(g, V, c, x + o.bw * 0.2 - 14, o.y + o.top + 4, 28, 26, I.A[i], 'A' + i, { kind: 'a', i });
+          bitBox(g, V, c, x + o.bw * 0.8 - 14, o.y + o.top + 4, 28, 26, I.B[i], 'B' + i, { kind: 'b', i });
+          wire(g, V, c, [[x + o.bw * 0.2, o.y + o.top + 30], [x + o.bw * 0.2, y0]], I.A[i]);
+          wire(g, V, c, [[x + o.bw * 0.8, o.y + o.top + 30], [x + o.bw * 0.8, y0]], I.B[i]);
+          wire(g, V, c, [[x + o.bw * 0.5, y0 + bh], [x + o.bw * 0.5, y0 + bh + 26]], s.s);
+          bitBox(g, V, c, x + o.bw * 0.5 - 14, y0 + bh + 26, 28, 26, s.s, 'S' + i, null, true);
+          // the adder box
+          g.fillStyle = sel ? alpha(c.accent, 0.5) : c.paper2; g.fillRect(x, y0, o.bw, bh);
+          g.strokeStyle = c.ink; g.lineWidth = V.px(sel ? 3 : 1.8); g.strokeRect(x, y0, o.bw, bh);
+          text(g, V, 'full adder', x + o.bw / 2, y0 + 28, { px: 12, weight: 800, align: 'center', halo: false });
+          text(g, V, 'bit ' + i, x + o.bw / 2, y0 + 46, { px: 11, mono: true, align: 'center', color: c.ink2, halo: false });
+          hits.push({ x, y: y0, w: o.bw, h: bh, kind: 'stage', i });
+        }
+        // carry wires: carry out of box i feeds box i+1 (which is on its left)
+        for (let i = 0; i < 3; i++) {
+          const xl = box(i + 1) + o.bw; // right edge of the left box (bit i+1)
+          const yc = y0 + bh / 2;
+          wire(g, V, c, [[box(i), yc], [xl, yc]], st.disp[i].cout, 3.2);
+          text(g, V, 'C', (box(i) + xl) / 2, yc - 8, { px: 10.5, mono: true, align: 'center', color: c.ink2, halo: false });
+        }
+        // carry in on the right, carry out on the left
+        const xr = box(0) + o.bw, yc = y0 + bh / 2;
+        wire(g, V, c, [[xr + o.gap + 4, yc], [xr, yc]], I.cin, 3.2);
+        bitBox(g, V, c, xr + o.gap + 4, yc - 13, 28, 26, I.cin, 'C in', { kind: 'cin', i: 0 });
+        const xl0 = box(3);
+        wire(g, V, c, [[xl0, yc], [xl0 - 12, yc]], st.disp[3].cout, 3.2);
+        bitBox(g, V, c, xl0 - 12 - 28, yc - 13, 28, 26, st.disp[3].cout, 'C out', null, false);
+        if (!V.thumb) text(g, V, 'click a bit to flip it', o.x + (V.narrow ? 0 : -56), y0 + bh + 82, { px: 11, color: c.ink2, halo: false });
+      }
+
+      // gate shapes: box (x, y, w, h), inputs on the left edge, output on the right
+      function gate(g, V, c, kind, x, y, w, h) {
+        g.beginPath();
+        if (kind === 'AND') {
+          g.moveTo(x, y); g.lineTo(x + w * 0.5, y); g.bezierCurveTo(x + w * 1.0, y, x + w * 1.0, y + h, x + w * 0.5, y + h); g.lineTo(x, y + h);
+        } else {
+          g.moveTo(x, y); g.quadraticCurveTo(x + w * 0.62, y, x + w, y + h / 2); g.quadraticCurveTo(x + w * 0.62, y + h, x, y + h); g.quadraticCurveTo(x + w * 0.28, y + h / 2, x, y);
+        }
+        g.closePath();
+        g.fillStyle = c.paper2; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        if (kind === 'XOR') { g.beginPath(); g.moveTo(x - 9, y); g.quadraticCurveTo(x + w * 0.28 - 9, y + h / 2, x - 9, y + h); g.stroke(); }
+        text(g, V, kind, x + w * 0.42, y + h / 2 + 4, { px: 10.5, weight: 800, align: 'center', halo: false, color: c.ink2 });
+      }
+
+      function drawGates(g, V, c) {
+        const k = L.gl.k;
+        const i = host.ctl.stage;
+        const s = st.disp[i];
+        g.save();
+        g.translate(L.gl.x, L.gl.y);
+        g.scale(k, k);
+        const V2 = Object.assign({}, V, { s: V.s * k, px: (n) => n / (V.s * k) });
+        text(g, V2, 'Inside the full adder for bit ' + i, 0, 0, { px: 13, weight: 800, halo: false });
+        // design space 740 x 215
+        const GW = 76, GH = 50;
+        const yA = 40, yB = 70, yC = 200;
+        const gx1 = [190, 34], ga1 = [190, 112], gx2 = [380, 44], ga2 = [380, 122], go = [540, 122];
+        gate(g, V2, c, 'XOR', gx1[0], gx1[1], GW, GH);
+        gate(g, V2, c, 'AND', ga1[0], ga1[1], GW, GH);
+        gate(g, V2, c, 'XOR', gx2[0], gx2[1], GW, GH);
+        gate(g, V2, c, 'AND', ga2[0], ga2[1], GW, GH);
+        gate(g, V2, c, 'OR', go[0], go[1], GW, GH);
+        const w = (pts, v) => wire(g, V2, c, pts, v, 3);
+        // A and B into both first-stage gates
+        w([[60, yA + 6], [140, yA + 6], [140, gx1[1] + 12], [gx1[0] + 2, gx1[1] + 12]], s.a);
+        w([[140, yA + 6], [140, ga1[1] + 12], [ga1[0] + 2, ga1[1] + 12]], s.a);
+        w([[60, yB + 22], [120, yB + 22], [120, gx1[1] + 38], [gx1[0] + 2, gx1[1] + 38]], s.b);
+        w([[120, yB + 22], [120, ga1[1] + 38], [ga1[0] + 2, ga1[1] + 38]], s.b);
+        // p = A xor B goes to both second-stage gates
+        w([[gx1[0] + GW, gx1[1] + GH / 2], [330, gx1[1] + GH / 2], [330, gx2[1] + 12], [gx2[0] + 2, gx2[1] + 12]], s.p);
+        w([[330, gx1[1] + GH / 2], [330, ga2[1] + 12], [ga2[0] + 2, ga2[1] + 12]], s.p);
+        // carry in
+        w([[60, yC], [350, yC], [350, gx2[1] + 38], [gx2[0] + 2, gx2[1] + 38]], s.cin);
+        w([[350, yC], [350, ga2[1] + 38], [ga2[0] + 2, ga2[1] + 38]], s.cin);
+        // g and t into the OR
+        w([[ga1[0] + GW * 0.95, ga1[1] + GH / 2], [470, ga1[1] + GH / 2], [470, go[1] + 12], [go[0] + 6, go[1] + 12]], s.g);
+        w([[ga2[0] + GW * 0.95, ga2[1] + GH / 2], [500, ga2[1] + GH / 2], [500, go[1] + 38], [go[0] + 6, go[1] + 38]], s.t);
+        // outputs
+        w([[gx2[0] + GW, gx2[1] + GH / 2], [640, gx2[1] + GH / 2]], s.s);
+        w([[go[0] + GW, go[1] + GH / 2], [640, go[1] + GH / 2]], s.cout);
+        // labels with live values
+        const lab = (str, v, x, y, al) => text(g, V2, str, x, y, { px: 12, weight: 800, mono: true, align: al || 'left', color: v ? c.elec : c.ink2, halo: true });
+        lab('A = ' + s.a, s.a, 0, yA + 10);
+        lab('B = ' + s.b, s.b, 0, yB + 26);
+        lab('C in = ' + s.cin, s.cin, 0, yC + 4);
+        lab('p = ' + s.p, s.p, 228, gx1[1] + GH + 14, 'center');
+        lab('g = ' + s.g, s.g, 228, ga1[1] + GH + 14, 'center');
+        lab('t = ' + s.t, s.t, 418, ga2[1] + GH + 14, 'center');
+        lab('Sum = ' + s.s, s.s, 648, gx2[1] + GH / 2 + 4);
+        lab('C out = ' + s.cout, s.cout, 648, go[1] + GH / 2 + 4);
+        g.restore();
+        // key to the gates
+        const kx = V.narrow ? 14 : 20, ky = V.narrow ? 300 + 128 : 250 + 232;
+        text(g, V, 'p = A xor B   g = A and B   t = p and C in', kx, ky, { px: 11.5, color: c.ink2, mono: true, halo: false });
+        text(g, V, 'Sum = p xor C in   C out = g or t', kx, ky + 16, { px: 11.5, color: c.ink2, mono: true, halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/09-fridge.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Fr = OM.fridge;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, hatchRect, alpha, mix } = OM.gfx;
+
+  const WARP = 600; // simulated seconds per real second
+  const HIST = 360; // samples of 30 simulated seconds: three hours
+
+  // The refrigerant loop as a path: evaporator up the left, compressor along the top,
+  // condenser down the right, expansion valve along the bottom.
+  const PATH = [[100, 330], [100, 92], [212, 92], [268, 92], [380, 92], [380, 330], [262, 330], [206, 330], [100, 330]];
+  const STATES = ['evap', 'vaporLow', 'compress', 'vaporHigh', 'cond', 'liquid', 'valve', 'mixLow'];
+  const SEG = PATH.slice(1).map((p, i) => ({ a: PATH[i], b: p, len: Math.hypot(p[0] - PATH[i][0], p[1] - PATH[i][1]), state: STATES[i] }));
+  const TOTAL = SEG.reduce((s, q) => s + q.len, 0);
+
+  function at(s) {
+    let d = ((s % 1) + 1) % 1 * TOTAL;
+    for (const q of SEG) {
+      if (d <= q.len) { const t = d / q.len; return { x: q.a[0] + (q.b[0] - q.a[0]) * t, y: q.a[1] + (q.b[1] - q.a[1]) * t, state: q.state, t }; }
+      d -= q.len;
+    }
+    return { x: PATH[0][0], y: PATH[0][1], state: 'evap', t: 0 };
+  }
+
+  OM.register({
+    id: 'fridge',
+    title: 'Refrigerator',
+    group: 'heat',
+    hook: 'A fridge does not make cold. It moves heat out of the box, using a fluid that boils at minus ten and condenses at forty.',
+    units: 'bar, °C, kJ/kg, W',
+    alt: 'The refrigerant loop with evaporator inside the cabinet, compressor, condenser outside and expansion valve; a pressure against enthalpy diagram with the R-134a saturation dome; and a chart of the cabinet temperature cycling around the thermostat setting.',
+    controls: [
+      { id: 'set', type: 'range', label: 'Thermostat setting', min: 0, max: 10, step: 0.5, value: 4, dec: 1, unit: '°C' },
+      { id: 'room', type: 'range', label: 'Room temperature', min: 15, max: 40, step: 1, value: 28, unit: '°C' },
+      { id: 'door', type: 'toggle', label: 'Door open', value: false },
+      { id: 'warm', type: 'button', label: 'Put in warm groceries', hint: 'Adds about 6 °C of warmth to the contents.' },
+    ],
+    content: {
+      intro: 'A fridge moves heat; it does not make cold. A liquid that boils at a very low temperature soaks up heat inside the box, a compressor squeezes that heat out to a hotter place, and the loop repeats.',
+      steps: [
+        { h: 'Evaporator: boil to absorb heat', p: 'Cold liquid refrigerant flows through a coil inside the cabinet. At this low pressure it boils at about −10 °C, so it takes heat from the food and air. Boiling needs energy, and that energy is the heat it removes.' },
+        { h: 'Compressor: squeeze it hot', p: 'The vapour is squeezed to about five times the pressure. Squeezing heats it well above room temperature. This is where the electricity goes in.' },
+        { h: 'Condenser: give the heat away', p: 'The hot high-pressure vapour flows through the coil at the back. It is hotter than the room, so heat flows out into the room and the vapour condenses back to liquid.' },
+        { h: 'Expansion valve: drop the pressure', p: 'The liquid squirts through a narrow tube into the low-pressure side. A little of it flashes to vapour, which chills the rest, and it arrives at the evaporator ready to soak up heat again.' },
+      ],
+      principle: {
+        lead: 'Pressure sets the boiling point. Low pressure inside means the fluid boils cold enough to take heat from the food. High pressure outside means it condenses hot enough to dump that heat into a warm room.',
+        eqs: [
+          { label: 'Heat taken from the cabinet', eq: 'Q~in~ = ṁ (h~1~ − h~4~)', note: 'ṁ is the refrigerant flow in kg/s and h the heat content (enthalpy) per kilogram at each corner of the loop.' },
+          { label: 'Compressor work', eq: 'W = ṁ (h~2~ − h~1~)' },
+          { label: 'Efficiency (COP)', eq: 'COP = Q~in~ / W', note: 'Heat moved for each unit of electricity. Around 2 to 3 here.' },
+          { label: 'The ceiling', eq: 'COP~max~ = T~cold~ / (T~hot~ − T~cold~)', note: 'Temperatures in kelvin. No fridge can beat this, and a hotter room or a colder setting lowers it.' },
+        ],
+        points: [
+          'The room gets back the heat removed plus the electricity used, Q + W. That is why the back of a fridge is warm, and why an open fridge door heats a room instead of cooling it.',
+          'The diagram on the right is the standard pressure against enthalpy chart. The dome is where the fluid is part liquid, part vapour. The loop 1–2–3–4 is the cycle.',
+          '**What this model leaves out:** superheat and subcooling, compressor oil, frost on the coil, fan power and real compressor maps. The fluid is R-134a with properties fitted to tables. Many modern fridges use isobutane (R-600a) instead.',
+        ],
+      },
+      myth: {
+        claim: 'Leaving the fridge door open cools the kitchen.',
+        truth: 'The fridge moves heat from inside the box to the coil at the back and adds the electricity it used. So an open door makes the room slightly warmer, never cooler, and the compressor runs flat out trying to keep up.',
+      },
+      tries: [
+        { label: 'Hot kitchen', text: 'A 38 °C room. The high side pressure and the electricity both go up.', set: { room: 38, set: 4, door: false } },
+        { label: 'Colder setting', text: 'Colder inside means a lower evaporator pressure and a lower COP.', set: { set: 0, room: 28 } },
+        { label: 'Door open', text: 'Watch the compressor run almost continuously.', set: { door: true } },
+        { label: 'Cool night', text: 'An 18 °C room needs less lift and uses less power.', set: { room: 18, set: 4, door: false } },
+        { label: 'Warm groceries', text: 'The cabinet warms up, then the compressor pulls it back down.', set: { door: false }, action: 'warm', play: true },
+      ],
+      quiz: [
+        { q: 'Where does the heat from inside the fridge end up?', opts: ['It is destroyed by the refrigerant', 'Released into the room at the condenser at the back, along with the compressor’s electrical energy', 'Stored in the compressor', 'Sent down the drain'], a: 1, why: 'Energy is conserved. The condenser gives out the heat taken from the cabinet plus the electrical work put in by the compressor.' },
+        { q: 'Why does the refrigerant boil at about −10 °C inside the evaporator?', opts: ['It is mixed with antifreeze', 'The pressure there is low, and the boiling point falls with pressure', 'The cabinet is an airtight vacuum', 'The compressor heats it'], a: 1, why: 'Every fluid boils at a temperature that depends on pressure. R-134a at about 2 bar boils at roughly −10 °C.' },
+        { q: 'You open the fridge door in a sealed kitchen and leave it. What happens to the kitchen temperature?', opts: ['It falls slowly', 'It rises slightly', 'It stays exactly the same', 'It falls quickly'], a: 1, why: 'The fridge adds its electrical energy to the room as heat, and the heat it removes from the room’s own air comes straight back out of the condenser.' },
+      ],
+      sources: [
+        'Y. A. Çengel and M. A. Boles, *Thermodynamics: An Engineering Approach* (the vapour-compression refrigeration cycle).',
+        '*ASHRAE Handbook: Fundamentals* (thermophysical properties of refrigerants).',
+      ],
+    },
+
+    create(host) {
+      const st = { tCab: 10, on: true, t: 0, flow: 0, phase: 0, hist: [], lastHist: 0, duty: 0.4, cyc: null, leak: 0 };
+      let L = null;
+
+      const cyc = () => st.cyc || Fr.cycle(st.tCab - Fr.EVAP_DT, host.ctl.room + Fr.COND_DT);
+
+      const sim = {
+        ref: { w: 780, h: 470 },
+        refNarrow: { w: 420, h: 900 },
+        state: st,
+        init() {
+          st.tCab = 10; st.on = true; st.t = 0; st.flow = 1; st.phase = 0; st.hist = []; st.lastHist = -1e9; st.duty = 0.4;
+          st.cyc = Fr.cycle(st.tCab - Fr.EVAP_DT, host.ctl.room + Fr.COND_DT);
+          // pre-run 40 simulated minutes so the first frame shows a settled loop
+          for (let i = 0; i < 480; i++) stepSim(5);
+        },
+        layout(V) {
+          L = V.narrow
+            ? { scene: { x: 0, y: 0, k: 0.95 }, ph: { x: 12, y: 440, w: 396, h: 240 }, hist: { x: 12, y: 700, w: 396, h: 180 } }
+            : { scene: { x: 6, y: 10, k: 1 }, ph: { x: 452, y: 14, w: 318, h: 250 }, hist: { x: 452, y: 288, w: 318, h: 170 } };
+        },
+        step(dt) {
+          let sim_ = dt * WARP;
+          while (sim_ > 0) { const h = Math.min(5, sim_); stepSim(h); sim_ -= h; }
+          const target = st.on ? 1 : 0;
+          st.flow += (target - st.flow) * Math.min(1, dt * 3);
+          st.phase += st.flow * dt * 0.11;
+        },
+        thumb() { st.phase = 0.3; },
+        action(id) { if (id === 'warm') st.tCab += 6; },
+        readouts() {
+          const c = cyc();
+          return [
+            { k: 'Inside', v: fmt(st.tCab, 1) + ' °C' },
+            { k: 'Compressor', v: st.on ? 'running' : 'off', tone: st.on ? 'warn' : 'good' },
+            { k: 'Low side', v: fmt(c.pe, 1) + ' bar, ' + fmt(c.tEvap, 0) + ' °C' },
+            { k: 'High side', v: fmt(c.pc, 1) + ' bar, ' + fmt(c.tCond, 0) + ' °C' },
+            { k: 'COP now', v: fmt(c.cop, 2) + ' (max ' + fmt(c.carnot, 1) + ')' },
+            { k: 'Cooling when on', v: fmt(c.qCool, 0) + ' W' },
+            { k: 'Electricity when on', v: fmt(c.wElec, 0) + ' W' },
+            { k: 'Runs', v: fmt(st.duty * 100, 0) + ' % of the time' },
+          ];
+        },
+        caption() { return st.on ? 'Compressor running' : 'Compressor off'; },
+        describe() { const c = cyc(); return 'Inside temperature ' + fmt(st.tCab, 1) + ' degrees. The compressor is ' + (st.on ? 'running' : 'off') + '. Coefficient of performance ' + fmt(c.cop, 2) + '.'; },
+
+        draw(g, V, c) {
+          drawLoop(g, V, c);
+          if (V.thumb) return;
+          drawPH(g, V, c);
+          drawHist(g, V, c);
+        },
+      };
+
+      function stepSim(h) {
+        const r = Fr.step({ tCab: st.tCab, on: st.on }, h, { setpoint: host.ctl.set, tRoom: host.ctl.room, door: host.ctl.door });
+        st.tCab = r.tCab; st.on = r.on; st.cyc = r.cyc; st.leak = r.leak;
+        st.t += h;
+        st.duty += ((st.on ? 1 : 0) - st.duty) * (h / 3600);
+        if (st.t - st.lastHist >= 30) {
+          st.lastHist = st.t;
+          st.hist.push([st.t, st.tCab, st.on ? 1 : 0]);
+          if (st.hist.length > HIST) st.hist.shift();
+        }
+      }
+
+      function stateColor(c, name) {
+        switch (name) {
+          case 'evap': case 'mixLow': return c.cold;
+          case 'vaporLow': return alpha(c.cold, 0.55);
+          case 'vaporHigh': case 'cond': return c.hot;
+          case 'liquid': return mix(c.hot, c.ink, 0.45);
+          default: return c.ink3;
+        }
+      }
+
+      function drawLoop(g, V, c) {
+        const k = L.scene.k;
+        g.save();
+        g.translate(L.scene.x, L.scene.y);
+        g.scale(k, k);
+        const V2 = Object.assign({}, V, { s: V.s * k, px: (n) => n / (V.s * k) });
+        const cy = cyc();
+        const ink = c.ink;
+        const lw = (n) => V2.px(n);
+
+        // cabinet interior and wall
+        g.fillStyle = alpha(c.cold, 0.1); g.fillRect(20, 52, 155, 298);
+        g.fillStyle = c.paper2; g.fillRect(175, 40, 14, 322);
+        hatchRect(g, V2, 175, 40, 14, 322, { gap: 7, color: c.line });
+        g.strokeStyle = ink; g.lineWidth = lw(1.8);
+        g.strokeRect(175, 40, 14, 322);
+        g.beginPath(); g.moveTo(20, 40); g.lineTo(189, 40); g.moveTo(20, 362); g.lineTo(189, 362); g.moveTo(20, 40); g.lineTo(20, 362); g.stroke();
+        if (host.ctl.door) { g.setLineDash([V2.px(6), V2.px(4)]); g.strokeStyle = c.bad; g.beginPath(); g.moveTo(20, 40); g.lineTo(20, 362); g.stroke(); g.setLineDash([]); }
+        // food
+        const food = [[36, 290, 44, 50], [86, 300, 36, 40], [126, 282, 34, 58], [44, 236, 40, 46]];
+        food.forEach(([x, y, w, h], i) => { g.fillStyle = alpha([c.good, c.warn, c.hot, c.elec][i], 0.35); g.fillRect(x, y, w, h); g.strokeStyle = ink; g.lineWidth = lw(1.2); g.strokeRect(x, y, w, h); });
+        text(g, V2, 'inside ' + fmt(st.tCab, 1) + ' °C', 28, 32, { px: 13, weight: 800, mono: true, color: c.cold });
+        text(g, V2, 'room ' + fmt(host.ctl.room, 0) + ' °C', 440, 32, { px: 13, weight: 800, mono: true, align: 'right', color: c.hot });
+
+        // pipes (drawn as a dark outline and a coloured core)
+        const drawSeg = (q, col, width) => {
+          g.lineCap = 'round';
+          g.strokeStyle = ink; g.lineWidth = lw(width + 3.2); g.beginPath(); g.moveTo(q.a[0], q.a[1]); g.lineTo(q.b[0], q.b[1]); g.stroke();
+          g.strokeStyle = col; g.lineWidth = lw(width); g.beginPath(); g.moveTo(q.a[0], q.a[1]); g.lineTo(q.b[0], q.b[1]); g.stroke();
+          g.lineCap = 'butt';
+        };
+        SEG.forEach((q) => {
+          if (q.state === 'compress' || q.state === 'valve') return;
+          let col = stateColor(c, q.state);
+          if (q.state === 'evap') { const gr = g.createLinearGradient(0, q.a[1], 0, q.b[1]); gr.addColorStop(0, alpha(c.cold, 0.95)); gr.addColorStop(1, alpha(c.cold, 0.5)); col = gr; }
+          if (q.state === 'cond') { const gr = g.createLinearGradient(0, q.a[1], 0, q.b[1]); gr.addColorStop(0, c.hot); gr.addColorStop(1, mix(c.hot, c.ink, 0.45)); col = gr; }
+          drawSeg(q, col, 9);
+        });
+        // coils drawn as zigzags over the straight pipe
+        const coil = (x, y1, y2, col, label) => {
+          g.strokeStyle = ink; g.lineWidth = lw(2); g.lineJoin = 'round';
+          g.beginPath();
+          const n = 9;
+          for (let i = 0; i <= n; i++) { const y = y1 + ((y2 - y1) * i) / n; const xx = x + (i % 2 ? 15 : -15); if (i === 0) g.moveTo(x, y); else g.lineTo(xx, y); }
+          g.lineTo(x, y2); g.stroke();
+        };
+        coil(100, 330, 92, c.cold); coil(380, 92, 330, c.hot);
+        // compressor
+        g.beginPath(); g.arc(240, 92, 30, 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.strokeStyle = ink; g.lineWidth = lw(2.4); g.stroke();
+        g.beginPath(); g.moveTo(222, 106); g.lineTo(240, 74); g.lineTo(258, 106); g.stroke();
+        text(g, V2, 'compressor', 240, 62 - 8, { px: 11.5, weight: 800, align: 'center' });
+        if (st.on) text(g, V2, 'W', 240, 136, { px: 13, weight: 800, align: 'center', color: c.elec, mono: true });
+        // expansion valve
+        g.beginPath(); g.moveTo(206, 318); g.lineTo(234, 330); g.lineTo(206, 342); g.closePath(); g.moveTo(262, 318); g.lineTo(234, 330); g.lineTo(262, 342); g.closePath();
+        g.fillStyle = c.paper2; g.fill(); g.strokeStyle = ink; g.lineWidth = lw(2.2); g.stroke();
+        text(g, V2, 'expansion valve', 234, 368, { px: 11.5, weight: 800, align: 'center' });
+        text(g, V2, 'evaporator', 100, 392, { px: 11.5, weight: 800, align: 'center', color: c.cold });
+        text(g, V2, 'condenser', 436, 354, { px: 11.5, weight: 800, align: 'right', color: c.hot });
+        // pressure tags
+        text(g, V2, 'low pressure ' + fmt(cy.pe, 1) + ' bar', 100, 408, { px: 11, mono: true, align: 'center', color: c.cold, weight: 700 });
+        text(g, V2, 'high pressure ' + fmt(cy.pc, 1) + ' bar', 436, 372, { px: 11, mono: true, align: 'right', color: c.hot, weight: 700 });
+
+        // moving refrigerant
+        const N = 44;
+        for (let i = 0; i < N; i++) {
+          const p = at(st.phase + i / N);
+          if (p.state === 'compress' || p.state === 'valve') continue;
+          const vapor = p.state === 'vaporLow' || p.state === 'vaporHigh' || (p.state === 'evap' && p.t > 0.45) || (p.state === 'cond' && p.t < 0.5);
+          const mixed = p.state === 'mixLow' || (p.state === 'evap' && p.t <= 0.45);
+          g.beginPath(); g.arc(p.x, p.y, 3.4, 0, Math.PI * 2);
+          if (vapor || (mixed && i % 2)) { g.fillStyle = c.paper2; g.fill(); g.strokeStyle = ink; g.lineWidth = lw(1); g.stroke(); }
+          else { g.fillStyle = ink; g.fill(); }
+        }
+
+        // heat arrows
+        const qIn = st.on ? cy.qCool : 0;
+        const aIn = 10 + 26 * clamp(qIn / 260, 0, 1);
+        if (st.on) for (const y of [150, 210, 270]) { arrow(g, V2, 40, y, 40 + aIn, y, c.hot, 2.4, 8); arrow(g, V2, 168, y, 168 - aIn, y, c.hot, 2.4, 8); }
+        text(g, V2, st.on ? 'heat from the food ' + fmt(qIn, 0) + ' W' : 'compressor off', 28, 50, { px: 10.5, color: c.hot, weight: 700 });
+        const qOut = st.on ? cy.qReject : 0;
+        const aOut = 10 + 40 * clamp(qOut / 360, 0, 1);
+        if (st.on) for (const y of [130, 200, 270]) arrow(g, V2, 404, y, 404 + aOut, y, c.hot, 3, 9);
+        if (st.on) text(g, V2, 'heat out', 410 + aOut / 2, 118, { px: 10.5, color: c.hot, weight: 700, align: 'center' });
+        if (st.on) text(g, V2, fmt(qOut, 0) + ' W', 410 + aOut / 2, 240, { px: 10.5, color: c.hot, weight: 700, align: 'center', mono: true });
+        // leak through the walls
+        const leakW = st.leak;
+        for (const y of [72, 346]) arrow(g, V2, 228 - 40, y, 192, y, alpha(c.hot, 0.8), 1.6, 6);
+        text(g, V2, 'leak in ' + fmt(leakW, 0) + ' W', 168, 66, { px: 10.5, color: c.ink2, align: 'right', mono: true, halo: false });
+        g.restore();
+      }
+
+      function drawPH(g, V, c) {
+        const b = L.ph;
+        text(g, V, 'Pressure (bar) against enthalpy (R-134a)', b.x, b.y + 10, { px: 12, weight: 700, halo: false });
+        const x0 = b.x + 38, y0 = b.y + 22, w = b.w - 48, h = b.h - 50;
+        const H0 = 140, H1 = 460, P0 = Math.log10(1), P1 = Math.log10(30);
+        const X = (hh) => x0 + ((hh - H0) / (H1 - H0)) * w;
+        const Y = (p) => y0 + h - ((Math.log10(p) - P0) / (P1 - P0)) * h;
+        g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(x0, y0, w, h);
+        for (const p of [1, 2, 5, 10, 20]) { line(g, V, x0, Y(p), x0 + w, Y(p), alpha(c.ink, 0.1), 1); text(g, V, String(p), x0 - 5, Y(p) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        for (const hh of [200, 300, 400]) { line(g, V, X(hh), y0, X(hh), y0 + h, alpha(c.ink, 0.1), 1); text(g, V, String(hh), X(hh), y0 + h + 13, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); }
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(x0, y0, w, h);
+        text(g, V, 'enthalpy, kJ/kg', x0 + w, y0 + h + 28, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+        // saturation dome
+        g.strokeStyle = c.ink2; g.lineWidth = V.px(1.8); g.beginPath();
+        let first = true;
+        for (let T = -30; T <= 80; T += 5) { const x = X(Fr.hf(T)), y = Y(Fr.psat(T)); if (first) { g.moveTo(x, y); first = false; } else g.lineTo(x, y); }
+        for (let T = 80; T >= -30; T -= 5) g.lineTo(X(Fr.hg(T)), Y(Fr.psat(T)));
+        g.stroke();
+        text(g, V, 'liquid', X(146), Y(24), { px: 10.5, color: c.ink2, halo: false });
+        text(g, V, 'vapour', X(456), Y(1.25), { px: 10.5, color: c.ink2, halo: false, align: 'right' });
+        // the cycle
+        const cy = cyc();
+        const pts = [[cy.h1, cy.pe], [cy.h2, cy.pc], [cy.h3, cy.pc], [cy.h4, cy.pe]];
+        g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1])))); g.closePath();
+        g.fillStyle = alpha(c.accent, 0.35); g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2.4); g.stroke();
+        pts.forEach((p, i) => {
+          g.beginPath(); g.arc(X(p[0]), Y(p[1]), V.px(5), 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.stroke();
+          const off = [[8, 14], [8, -6], [-10, -6], [-12, 14]][i];
+          text(g, V, String(i + 1), X(p[0]) + off[0], Y(p[1]) + off[1], { px: 12, weight: 800, mono: true });
+        });
+        const tags = [['1  evaporator out', cy.h1 + 4, cy.pe * 0.8], ['compressor', (cy.h1 + cy.h2) / 2 + 18, (cy.pe * cy.pc) ** 0.5 * 0.92]];
+        text(g, V, 'compressor adds h', X(cy.h2) - 4, Y(cy.pc) - 8, { px: 10, color: c.ink2, align: 'right', halo: false });
+        text(g, V, 'valve', X(cy.h3) + 6, Y((cy.pe * cy.pc) ** 0.5), { px: 10, color: c.ink2, halo: false });
+        text(g, V, 'heat in', X((cy.h4 + cy.h1) / 2), Y(cy.pe) + 14, { px: 10, color: c.ink2, align: 'center', halo: false });
+        void tags;
+      }
+
+      function drawHist(g, V, c) {
+        const b = L.hist;
+        text(g, V, 'Inside temperature (°C), last 3 hours', b.x, b.y + 10, { px: 12, weight: 700, halo: false });
+        const x0 = b.x + 34, y0 = b.y + 20, w = b.w - 42, h = b.h - 46;
+        const T0 = 0, T1 = 20;
+        const Y = (t) => y0 + h - ((t - T0) / (T1 - T0)) * h;
+        g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(x0, y0, w, h);
+        g.fillStyle = alpha(c.good, 0.2); g.fillRect(x0, Y(host.ctl.set + 1), w, Y(host.ctl.set - 1) - Y(host.ctl.set + 1));
+        for (const t of [0, 5, 10, 15, 20]) { line(g, V, x0, Y(t), x0 + w, Y(t), alpha(c.ink, 0.1), 1); text(g, V, String(t), x0 - 5, Y(t) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(x0, y0, w, h);
+        const hs = st.hist;
+        if (hs.length > 1) {
+          const tEnd = hs[hs.length - 1][0], tStart = tEnd - HIST * 30;
+          const X = (t) => x0 + ((t - tStart) / (HIST * 30)) * w;
+          // compressor-on shading
+          g.fillStyle = alpha(c.hot, 0.28);
+          for (let i = 0; i < hs.length - 1; i++) if (hs[i][2]) g.fillRect(X(hs[i][0]), y0 + h - 7, Math.max(1, X(hs[i + 1][0]) - X(hs[i][0])), 7);
+          g.strokeStyle = c.cold; g.lineWidth = V.px(2.2); g.lineJoin = 'round'; g.beginPath();
+          hs.forEach((p, i) => { const x = X(p[0]), y = Y(clamp(p[1], T0, T1)); if (i) g.lineTo(x, y); else g.moveTo(x, y); });
+          g.stroke();
+        }
+        text(g, V, 'green band: the thermostat range', x0 + 6, y0 + 14, { px: 10, color: c.good, weight: 700, halo: false });
+        text(g, V, 'orange strip: compressor on', x0 + w - 4, y0 + h + 16, { px: 10, color: c.hot, weight: 700, align: 'right', halo: false });
+        text(g, V, 'sped up ×' + WARP, x0 + 2, y0 + h + 16, { px: 10, color: c.ink2, halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/10-wing.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Af = OM.airfoil;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, alpha, parse } = OM.gfx;
+
+  const SHAPES = {
+    sym: { eps: 0.1, kappa: 0 },
+    cam: { eps: 0.1, kappa: 0.05 },
+    thin: { eps: 0.04, kappa: 0.02 },
+  };
+  const VIEW = { x0: -3.0, x1: 3.4, y0: -2.2, y1: 2.2 };
+  const RHO = 1.225;
+  const G0 = 9.80665;
+  const NT = 170; // tracers
+  const TRAIL = 16;
+
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  OM.register({
+    id: 'wing',
+    title: 'Airplane wing',
+    group: 'heat',
+    hook: 'A wing makes lift by bending the air downwards. The air over the top gets to the back first, and the reasons you were told are mostly wrong.',
+    units: 'deg, m/s, m², kN, Cₗ',
+    alt: 'Potential flow around a wing section with a pressure map, tracer particles, a lift arrow, a race between two air particles, and a chart of lift coefficient against angle of attack with the stall.',
+    controls: [
+      { id: 'aoa', type: 'range', label: 'Angle of attack', min: -6, max: 20, step: 0.5, value: 5, dec: 1, unit: '°' },
+      { id: 'shape', type: 'seg', label: 'Wing section', value: 'cam', options: [{ v: 'sym', l: 'Symmetric' }, { v: 'cam', l: 'Cambered' }, { v: 'thin', l: 'Thin' }] },
+      { id: 'speed', type: 'range', label: 'Airspeed', min: 10, max: 100, step: 1, value: 50, unit: 'm/s', hint: '50 m/s is about 180 km/h.' },
+      { id: 'area', type: 'range', label: 'Wing area', min: 1, max: 40, step: 1, value: 16, unit: 'm²', hint: 'A small four-seat plane has about 16 m².' },
+      { id: 'race', type: 'toggle', label: 'Race two air particles', value: false, hint: 'Released together just above and below the wing’s nose.' },
+    ],
+    content: {
+      intro: 'A wing deflects the air it meets downwards, and the air pushes the wing up in return. The flow speeds up over the top, where the pressure falls, and slows underneath, where it rises. Both descriptions are the same thing seen two ways.',
+      steps: [
+        { h: 'The air splits at the nose', p: 'Some air goes over the wing and some under. The point where it divides is the stagnation point. Tilt the wing up and it slides down to the underside.' },
+        { h: 'The top is faster', p: 'Air is pulled round the curved top surface, so it speeds up there. Fast air has lower pressure (Bernoulli). The blue on the top surface is that suction.' },
+        { h: 'The flow leaves smoothly', p: 'At the sharp trailing edge the air cannot turn the corner, so it leaves along the wing. That rule (the Kutta condition) fixes how much the air circulates around the wing, and therefore the lift.' },
+        { h: 'Too steep and it stalls', p: 'Past about 15° the air can no longer follow the top surface. It breaks away into a turbulent wake, the suction collapses and the lift drops. Try 20°.' },
+      ],
+      principle: {
+        lead: 'Lift is pressure acting on the wing’s surface. The pressure map in the picture is computed from the flow speed at every point, and adding it up around the wing gives the lift.',
+        eqs: [
+          { label: 'Lift force', eq: 'L = ½ ρ V² S C~L~', note: 'ρ = 1.225 kg/m³ is air density at sea level, V the airspeed, S the wing area.' },
+          { label: 'Thin-wing result', eq: 'C~L~ ≈ 2π (α − α~0~)', note: 'α is the angle of attack in radians. That is about 0.11 per degree. A cambered wing has a negative zero-lift angle α~0~.' },
+          { label: 'Kutta–Joukowski', eq: 'L′ = ρ V Γ', note: 'Lift per metre of span equals density, speed and the circulation Γ around the wing.' },
+          { label: 'Bernoulli', eq: 'p + ½ ρ v² = constant', note: 'Along a streamline, faster air means lower pressure.' },
+        ],
+        points: [
+          'The flow here is the exact mathematical solution for a Joukowski wing section (a circle transformed by z = ζ + 1/ζ). The lift from the pressure map and from the circulation agree to within 2 percent, and the tests check that.',
+          '**What this model leaves out:** viscosity. It cannot show drag or the boundary layer. The stall curve is a typical shape added by hand, and the turbulence past the stall is illustrative, not calculated.',
+        ],
+      },
+      myth: {
+        title: 'Common myth: equal transit time',
+        claim: 'The air over the top has further to go, so it must travel faster to meet up with the air from underneath at the back.',
+        truth: 'There is no rule that the two bits of air must meet up again. Switch on the race: the air over the top gets to the back well ahead of the air below. The flow is faster over the top because of the circulation the sharp trailing edge demands, not because it is catching up.',
+      },
+      tries: [
+        { label: 'Cruising, 5°', text: 'A typical angle in steady flight.', set: { aoa: 5, shape: 'cam', speed: 50, area: 16, race: false } },
+        { label: 'Zero angle', text: 'The symmetric section makes no lift. The cambered one still does.', set: { aoa: 0 } },
+        { label: 'Stall', text: 'Beyond 15° the lift drops and the air breaks away.', set: { aoa: 19, shape: 'cam' } },
+        { label: 'Race the air', text: 'Which particle reaches the trailing edge first?', set: { aoa: 5, race: true } },
+        { label: 'Slow for landing', text: 'At half the speed you need nearly 4 times the lift coefficient.', set: { speed: 28, aoa: 12, race: false } },
+      ],
+      quiz: [
+        { q: 'Which description of how a wing makes lift is correct?', opts: ['The air over the top must go faster to meet the air from underneath', 'The wing turns the airflow downwards, pressure is lower above and higher below, and the air pushes the wing up in return', 'The wing is sucked up into a vacuum above it', 'Air hits the underside like a skipping stone and nothing else matters'], a: 1, why: 'Pushing air down, lower pressure above and higher pressure below, and the circulation around the wing are all the same physics described from different angles. The equal-transit-time story is the one that is wrong.' },
+        { q: 'Two air particles split at the nose of the wing. Which one reaches the trailing edge first in this simulation?', opts: ['The one underneath', 'They arrive together', 'The one over the top', 'It depends on the colour'], a: 2, why: 'The air over the top moves faster and arrives well ahead. Nothing forces the two to meet again.' },
+        { q: 'What happens to the lift when the angle of attack is raised well beyond about 15°?', opts: ['It keeps growing in a straight line', 'The air separates from the top surface and the lift drops: a stall', 'It becomes zero exactly', 'The wing gets thicker'], a: 1, why: 'The smooth flow round the top breaks down, the suction collapses and the lift falls. It is why pilots lower the nose to recover.' },
+      ],
+      sources: [
+        'J. D. Anderson Jr., *Fundamentals of Aerodynamics*, McGraw-Hill (potential flow, the Kutta condition, thin airfoil theory).',
+        'I. H. Abbott and A. E. von Doenhoff, *Theory of Wing Sections*, Dover (1959).',
+      ],
+    },
+
+    create(host) {
+      const st = { key: '', af: null, field: null, fieldKey: '', tr: null, raceData: null, raceKey: '', raceT: 0, hold: 0, rand: rng(7), peak: 1 };
+      let L = null;
+
+      const aoa = () => host.ctl.aoa;
+      function ensure() {
+        const sh = SHAPES[host.ctl.shape];
+        const key = host.ctl.aoa + '|' + host.ctl.shape;
+        if (st.key !== key) {
+          st.key = key;
+          st.af = Af.make({ eps: sh.eps, kappa: sh.kappa, aoaDeg: host.ctl.aoa });
+          st.peak = Math.max.apply(null, st.af.surface(240).map((p) => p.speed));
+          st.fieldKey = '';
+          st.raceKey = '';
+        }
+        return st.af;
+      }
+      const stall = () => Af.stallModel(ensure(), aoa());
+
+      // ---- flow area placement
+      const X = (u) => L.flow.x + ((u - VIEW.x0) / (VIEW.x1 - VIEW.x0)) * L.flow.w;
+      const Y = (v) => L.flow.y + L.flow.h / 2 - (v * L.flow.h) / (VIEW.y1 - VIEW.y0);
+
+      function spawn(t, anywhere) {
+        t.x = anywhere ? VIEW.x0 + st.rand() * (VIEW.x1 - VIEW.x0) : VIEW.x0 + st.rand() * 0.15;
+        t.y = clamp((st.rand() + st.rand() + st.rand() - 1.5) * 1.5, VIEW.y0 + 0.1, VIEW.y1 - 0.1);
+        t.trail = [];
+      }
+      function initTracers() {
+        st.tr = Array.from({ length: NT }, () => { const t = {}; spawn(t, true); return t; });
+      }
+
+      function buildField(c) {
+        const af = ensure();
+        const w = 150, h = Math.round(w * ((VIEW.y1 - VIEW.y0) / (VIEW.x1 - VIEW.x0)));
+        if (!st.field) st.field = document.createElement('canvas');
+        st.field.width = w; st.field.height = h;
+        const fg = st.field.getContext('2d');
+        const img = fg.createImageData(w, h);
+        const hot = parse(c.hot), cold = parse(c.cold);
+        for (let j = 0; j < h; j++) {
+          for (let i = 0; i < w; i++) {
+            const x = VIEW.x0 + ((i + 0.5) / w) * (VIEW.x1 - VIEW.x0);
+            const y = VIEW.y1 - ((j + 0.5) / h) * (VIEW.y1 - VIEW.y0);
+            const r = af.velocityScreen(x, y);
+            const o = (j * w + i) * 4;
+            if (r.inside || !Number.isFinite(r.cp)) { img.data[o + 3] = 0; continue; }
+            const cp = clamp(r.cp, -3, 1);
+            const col = cp < 0 ? cold : hot;
+            const a = cp < 0 ? Math.pow(clamp(-cp / 2.6, 0, 1), 0.75) * 0.8 : Math.pow(clamp(cp, 0, 1), 0.9) * 0.8;
+            img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = Math.round(a * 255);
+          }
+        }
+        fg.putImageData(img, 0, 0);
+        st.fieldKey = st.key + '|' + c.hot + c.cold;
+      }
+
+      function ensureRace() {
+        if (st.raceKey === st.key && st.raceData) return st.raceData;
+        st.raceData = Af.race(ensure());
+        st.raceKey = st.key;
+        st.raceT = 0; st.hold = 0;
+        return st.raceData;
+      }
+      function posAt(path, t) {
+        if (t <= path[0][0]) return path[0];
+        for (let i = 1; i < path.length; i++) if (path[i][0] >= t) {
+          const a = path[i - 1], b = path[i], u = (t - a[0]) / Math.max(1e-9, b[0] - a[0]);
+          return [t, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+        }
+        return path[path.length - 1];
+      }
+
+      const sim = {
+        ref: { w: 780, h: 470 },
+        refNarrow: { w: 420, h: 820 },
+        state: st,
+        init() { st.key = ''; st.rand = rng(7); ensure(); initTracers(); st.raceT = 0; st.hold = 0; },
+        layout(V) {
+          L = V.narrow
+            ? { flow: { x: 0, y: 6, w: 420, h: Math.round(420 * 4.4 / 6.4) }, chart: { x: 12, y: 330, w: 396, h: 230 }, info: { x: 14, y: 590 } }
+            : { flow: { x: 6, y: 8, w: 490, h: Math.round(490 * 4.4 / 6.4) }, chart: { x: 512, y: 14, w: 262, h: 226 }, info: { x: 512, y: 268 } };
+          st.fieldKey = '';
+        },
+        step(dt) {
+          const af = ensure();
+          const stl = stall().stalled;
+          const dtw = dt * 1.5;
+          st.tr.forEach((t) => {
+            const v1 = af.velocityScreen(t.x, t.y);
+            if (v1.inside || !Number.isFinite(v1.u)) { spawn(t, false); return; }
+            const v2 = af.velocityScreen(t.x + 0.5 * dtw * v1.u, t.y + 0.5 * dtw * v1.v);
+            let u = v2.u, v = v2.v;
+            if (!Number.isFinite(u)) { spawn(t, false); return; }
+            if (stl && t.x > -0.6 && t.y > -0.1 && t.y < 1.1) {
+              const k = clamp((aoa() - Af.STALL_DEG) / 4, 0.3, 1.2);
+              u *= 1 - 0.55 * k; v += (st.rand() - 0.35) * 2.6 * k;
+            }
+            const sp = Math.hypot(u, v) || 1e-9;
+            const step = Math.min(dtw * sp, 0.12);
+            t.x += (u / sp) * step; t.y += (v / sp) * step;
+            t.trail.push([t.x, t.y]);
+            if (t.trail.length > TRAIL) t.trail.shift();
+            if (t.x > VIEW.x1 || t.x < VIEW.x0 - 0.2 || Math.abs(t.y) > VIEW.y1) spawn(t, false);
+          });
+          if (host.ctl.race) {
+            const r = ensureRace();
+            const end = Math.max(r.top.t, r.bottom.t);
+            if (st.raceT < end + 0.6) st.raceT += dt * 1.1;
+            else { st.hold += dt; if (st.hold > 1.2) { st.raceT = 0; st.hold = 0; } }
+          }
+        },
+        thumb() { ensure(); for (let i = 0; i < 70; i++) sim.step(1 / 30); },
+        onControl(id) { if (id === 'race') { st.raceT = 0; st.hold = 0; } },
+        readouts() {
+          const af = ensure();
+          const s = stall();
+          const V = host.ctl.speed;
+          const q = 0.5 * RHO * V * V;
+          const Lf = q * host.ctl.area * s.cl;
+          const out = [
+            { k: 'Lift coefficient', v: fmt(s.cl, 2), tone: s.stalled ? 'bad' : '' },
+            { k: 'Lift', v: fmt(Lf / 1000, 1) + ' kN' },
+            { k: 'Could hold up', v: fmt(Lf / G0, 0) + ' kg' },
+            { k: 'Dynamic pressure', v: fmt(q / 1000, 2) + ' kPa' },
+            { k: 'Fastest air', v: fmt(st.peak, 2) + ' × airspeed' },
+            { k: 'Wing section', v: fmt(af.thickness * 100, 0) + ' % thick' },
+          ];
+          if (host.ctl.race && st.raceData) {
+            const r = st.raceData;
+            out.push({ k: 'Top beats bottom by', v: fmt((r.bottom.t / r.top.t - 1) * 100, 0) + ' %', tone: 'good' });
+          } else out.push({ k: 'Stall angle', v: Af.STALL_DEG + '°' });
+          return out;
+        },
+        caption() { const s = stall(); return s.stalled ? 'Stalled: the flow has separated' : s.cl > 0.05 ? 'Making lift' : s.cl < -0.05 ? 'Pushing down' : 'No lift'; },
+        describe() { const s = stall(); return 'Angle of attack ' + fmt(aoa(), 1) + ' degrees, lift coefficient ' + fmt(s.cl, 2) + (s.stalled ? '. The wing is stalled.' : '.'); },
+
+        draw(g, V, c) {
+          const af = ensure();
+          if (st.fieldKey !== st.key + '|' + c.hot + c.cold) buildField(c);
+          const F = L.flow;
+          g.fillStyle = alpha(c.paper2, 0.55); g.fillRect(F.x, F.y, F.w, F.h);
+          g.imageSmoothingEnabled = true;
+          g.drawImage(st.field, F.x, F.y, F.w, F.h);
+          g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(F.x, F.y, F.w, F.h);
+
+          // tracers
+          if (!V.thumb || true) {
+            g.lineCap = 'round'; g.lineJoin = 'round';
+            st.tr.forEach((t) => {
+              if (t.trail.length < 2) return;
+              for (let i = 1; i < t.trail.length; i++) {
+                const a = i / t.trail.length;
+                g.strokeStyle = alpha(c.ink, 0.12 + 0.5 * a); g.lineWidth = V.px(1.2);
+                g.beginPath(); g.moveTo(X(t.trail[i - 1][0]), Y(t.trail[i - 1][1])); g.lineTo(X(t.trail[i][0]), Y(t.trail[i][1])); g.stroke();
+              }
+            });
+          }
+
+          // wing body
+          g.beginPath();
+          af.bodyScreen.forEach((p, i) => (i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))));
+          g.closePath();
+          g.fillStyle = c.paper2; g.fill();
+          g.fillStyle = alpha(c.metal, 0.55); g.fill();
+          g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+
+          // lift arrow at the quarter chord
+          const s = stall();
+          const xs = af.bodyScreen.map((p) => p[0]);
+          const xle = Math.min.apply(null, xs), xq = xle + 0.25 * af.chord;
+          const a = (aoa() * Math.PI) / 180;
+          if (Math.abs(s.cl) > 0.02) {
+            const len = clamp(s.cl, -1.2, 2.2) * 62;
+            const x0 = X(xq), y0 = Y(0);
+            arrow(g, V, x0, y0, x0 - Math.sin(a) * len, y0 - Math.cos(a) * len, c.hot, 3.4, 12);
+            text(g, V, 'lift', x0 - Math.sin(a) * len + 8, y0 - Math.cos(a) * len - 4, { px: 12, weight: 800, color: c.hot });
+          }
+          // free stream direction
+          const ax = F.x + 22, ay = F.y + F.h - 28;
+          arrow(g, V, ax, ay + Math.sin(a) * 26, ax + Math.cos(a) * 52, ay - Math.sin(a) * 26 + Math.sin(a) * 26 - Math.sin(a) * 26, c.ink2, 2, 9);
+          text(g, V, 'air', ax, ay - 8, { px: 11, color: c.ink2, weight: 700 });
+          if (s.stalled) text(g, V, 'STALL: the flow has separated', X(0.9), Y(1.75), { px: 13, weight: 800, color: c.bad, align: 'center' });
+          if (!V.thumb) {
+            text(g, V, 'fast air, low pressure', X(1.75), Y(1.15), { px: 11, color: c.cold, weight: 700, align: 'center', halo: true });
+            text(g, V, 'slower, higher pressure', X(1.75), Y(-1.1), { px: 11, color: c.hot, weight: 700, align: 'center', halo: true });
+          }
+
+          // race
+          if (host.ctl.race) {
+            const r = ensureRace();
+            const dots = [[r.top, c.accent, 'top'], [r.bottom, c.ink, 'bottom']];
+            dots.forEach(([run, col, lab]) => {
+              const p = posAt(run.path, st.raceT);
+              g.strokeStyle = alpha(col === c.ink ? c.ink : c.accent, 0.8); g.lineWidth = V.px(2);
+              g.beginPath();
+              for (let i = 0; i < run.path.length && run.path[i][0] <= st.raceT; i++) { const q = run.path[i]; if (i) g.lineTo(X(q[1]), Y(q[2])); else g.moveTo(X(q[1]), Y(q[2])); }
+              g.lineTo(X(p[1]), Y(p[2])); g.stroke();
+              g.beginPath(); g.arc(X(p[1]), Y(p[2]), V.px(6.5), 0, Math.PI * 2); g.fillStyle = col; g.fill(); g.strokeStyle = c.paper2; g.lineWidth = V.px(2); g.stroke();
+            });
+            const done = st.raceT >= r.top.t;
+            text(g, V, done ? 'top finished first' : 'racing…', X(1.6), Y(-1.9), { px: 12, weight: 800, align: 'center', color: c.ink });
+            text(g, V, 'yellow: over the top    black: underneath', F.x + 10, F.y + 16, { px: 10.5, color: c.ink2 });
+          }
+          if (V.thumb) return;
+          // colour key
+          const ky = F.y + F.h + 14;
+          const gr = g.createLinearGradient(F.x + 10, 0, F.x + 170, 0);
+          gr.addColorStop(0, alpha(c.cold, 0.85)); gr.addColorStop(0.45, alpha(c.cold, 0)); gr.addColorStop(0.62, alpha(c.hot, 0)); gr.addColorStop(1, alpha(c.hot, 0.85));
+          g.fillStyle = c.paper2; g.fillRect(F.x + 10, ky, 160, 10); g.fillStyle = gr; g.fillRect(F.x + 10, ky, 160, 10); g.strokeStyle = c.ink; g.lineWidth = V.px(1); g.strokeRect(F.x + 10, ky, 160, 10);
+          text(g, V, 'lower pressure', F.x + 10, ky + 24, { px: 10.5, color: c.cold, weight: 700, halo: false });
+          text(g, V, 'higher', F.x + 170, ky + 24, { px: 10.5, color: c.hot, weight: 700, align: 'right', halo: false });
+          text(g, V, 'Pressure compared with the air far away', F.x + 184, ky + 9, { px: 10.5, color: c.ink2, halo: false });
+
+          drawChart(g, V, c, af);
+        },
+      };
+
+      function drawChart(g, V, c, af) {
+        const b = L.chart;
+        text(g, V, 'Lift coefficient against angle', b.x, b.y + 10, { px: 12, weight: 700, halo: false });
+        const x0 = b.x + 34, y0 = b.y + 22, w = b.w - 44, h = b.h - 52;
+        const A0 = -8, A1 = 22, C0 = -1, C1 = 2.2;
+        const PX = (a) => x0 + ((a - A0) / (A1 - A0)) * w, PY = (cl) => y0 + h - ((cl - C0) / (C1 - C0)) * h;
+        g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(x0, y0, w, h);
+        for (const cl of [-1, 0, 1, 2]) { line(g, V, x0, PY(cl), x0 + w, PY(cl), alpha(c.ink, cl === 0 ? 0.4 : 0.12), 1); text(g, V, String(cl), x0 - 5, PY(cl) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        for (const a of [-5, 0, 5, 10, 15, 20]) { line(g, V, PX(a), y0, PX(a), y0 + h, alpha(c.ink, 0.1), 1); text(g, V, String(a), PX(a), y0 + h + 13, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); }
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(x0, y0, w, h);
+        // potential-flow line continues past the stall as a dashed guide
+        g.setLineDash([V.px(4), V.px(3)]); g.strokeStyle = c.ink2; g.lineWidth = V.px(1.4); g.beginPath();
+        for (let a = A0; a <= A1; a += 1) { const v = Af.stallModel(af, a).pot; if (a === A0) g.moveTo(PX(a), PY(clamp(v, C0, C1))); else g.lineTo(PX(a), PY(clamp(v, C0, C1))); }
+        g.stroke(); g.setLineDash([]);
+        // typical curve with the stall
+        g.strokeStyle = c.hot; g.lineWidth = V.px(2.6); g.beginPath();
+        for (let a = A0; a <= A1; a += 0.5) { const v = Af.stallModel(af, a).cl; if (a === A0) g.moveTo(PX(a), PY(v)); else g.lineTo(PX(a), PY(v)); }
+        g.stroke();
+        const s = stall();
+        g.beginPath(); g.arc(PX(aoa()), PY(s.cl), V.px(6), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        text(g, V, 'stall', PX(Af.STALL_DEG) + 5, PY(Af.stallModel(af, Af.STALL_DEG).cl) + 14, { px: 10.5, weight: 800, color: c.bad });
+        text(g, V, 'angle of attack, degrees', x0 + w, y0 + h + 28, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+        text(g, V, 'dashed: smooth flow', x0 + w - 6, y0 + h - 22, { px: 10, color: c.ink2, align: 'right', halo: false });
+        text(g, V, 'solid: with stall', x0 + w - 6, y0 + h - 8, { px: 10, color: c.hot, weight: 700, align: 'right', halo: false });
+        // numbers
+        const V_ = host.ctl.speed, q = 0.5 * RHO * V_ * V_;
+        const I = L.info;
+        const Lf = q * host.ctl.area * s.cl;
+        text(g, V, 'Lift = ½ ρ V² S C_L', I.x, I.y, { px: 12.5, weight: 800, mono: true, halo: false });
+        text(g, V, '= ½ × 1.225 × ' + V_ + '² × ' + host.ctl.area + ' × ' + fmt(s.cl, 2), I.x, I.y + 18, { px: 10.5, mono: true, color: c.ink2, halo: false });
+        text(g, V, '= ' + fmt(Lf, 0) + ' N', I.x, I.y + 38, { px: 15, weight: 800, mono: true, color: c.hot, halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/11-anc.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const An = OM.anc;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, alpha } = OM.gfx;
+
+  const SOUND = 343; // m/s
+  const CYCLES = 3; // cycles shown across each trace
+
+  OM.register({
+    id: 'anc',
+    title: 'Noise-cancelling headphones',
+    group: 'signals',
+    hook: 'Add sound to remove sound. A second wave, the mirror image of the first, cancels it at your ear, but only if it arrives on time.',
+    units: 'Hz, µs, dB, °',
+    alt: 'Three waveform traces showing the noise, the anti-noise and the sum you hear, a block diagram of the headphone electronics, and a chart of noise reduction against frequency for the current delay.',
+    controls: [
+      { id: 'mode', type: 'seg', label: 'Who makes the anti-noise?', value: 'manual', options: [{ v: 'manual', l: 'You, by hand' }, { v: 'auto', l: 'Headphone electronics' }] },
+      { id: 'f', type: 'range', label: 'Noise pitch', min: 50, max: 4000, step: 10, value: 300, unit: 'Hz', hint: 'An engine drone is about 100 Hz, speech about 300 to 3000 Hz.' },
+      { id: 'amp', type: 'range', label: 'Anti-noise loudness', min: 0, max: 1.5, step: 0.05, value: 0.7, dec: 2, unit: '× the noise', showIf: (c) => c.mode === 'manual' },
+      { id: 'phase', type: 'range', label: 'Anti-noise timing (phase)', min: 0, max: 360, step: 1, value: 120, unit: '°', showIf: (c) => c.mode === 'manual', hint: 'Turn it to 180° for the mirror image.' },
+      { id: 'tau', type: 'range', label: 'Electronics delay', min: 0, max: 400, step: 5, value: 60, unit: 'µs', hint: 'Microphone to chip to speaker. 60 µs is about the time sound takes to cross 2 cm.' },
+    ],
+    content: {
+      intro: 'Noise-cancelling headphones add sound to remove sound. A microphone hears the noise, the electronics flip the wave upside down, and the speaker plays that mirror image so the two cancel at your ear.',
+      steps: [
+        { h: 'Waves add up', p: 'Where two sound waves meet, their pressures add. A crest meeting a crest makes a louder sound. A crest meeting a trough makes them cancel.' },
+        { h: 'Play the mirror image', p: 'A wave shifted by half a cycle (180°) is the exact opposite of the original. Add the two together and, at every moment, the result is zero.' },
+        { h: 'The clock is ticking', p: 'The microphone, chip and speaker take a few tens of microseconds. By the time the anti-noise arrives, the noise has moved on, so the mirror image is slightly off.' },
+        { h: 'Low pitches win', p: 'A fixed delay is a small slice of a long wave and a big slice of a short one. 60 µs is 2 percent of a 300 Hz cycle but 36 percent of a 6 kHz cycle, so high pitches cannot be cancelled this way.' },
+      ],
+      principle: {
+        lead: 'Cancelling is a sum of two waves of the same pitch. The size of what is left depends only on how well the anti-noise matches in loudness and timing.',
+        eqs: [
+          { label: 'What is left', eq: 'residual = | 1 + a e^{iφ} |', note: 'a is the anti-noise loudness compared with the noise, φ its timing shift. Perfect is a = 1 and φ = 180°.' },
+          { label: 'With a delay τ', eq: 'residual = 2 sin(π f τ)', note: 'An exact mirror image made τ seconds late. Small for low f, and more than 1 (louder) above f = 1 ÷ (6τ).' },
+          { label: 'In decibels', eq: 'reduction = −20 log₁₀(residual)', note: '10 dB is roughly half as loud to your ear. 20 dB is a tenth of the pressure.' },
+        ],
+        points: [
+          'That is why headphones tackle steady low rumble, like a jet engine or a bus, and do little for voices, hiss or a sudden clatter. Soft ear cushions block the high pitches the electronics cannot.',
+          'Real headphones have one microphone outside and often one inside the cup, and the electronics adapt continuously to the exact delay of your head and the cup.',
+          '**What this model leaves out:** adaptive filtering, the speaker’s own response and the position of your head. It shows one steady pitch, where real noise is a mix of many.',
+        ],
+      },
+      myth: {
+        claim: 'Noise-cancelling headphones work by blocking the sound out, like earplugs.',
+        truth: 'Soft cups and ear pads do block the high pitches. The electronics do something different: they make a second sound that cancels the low rumble at your ear. Two sounds adding up to silence.',
+      },
+      tries: [
+        { label: 'Cancel it by hand', text: 'Anti-noise exactly equal and opposite.', set: { mode: 'manual', amp: 1, phase: 180 } },
+        { label: 'Wrong by 90°', text: 'Same loudness but a quarter cycle late. It gets louder, not quieter.', set: { mode: 'manual', amp: 1, phase: 90 } },
+        { label: 'Engine drone, 100 Hz', text: 'Low pitch: cancels very well.', set: { mode: 'auto', f: 100, tau: 60 } },
+        { label: 'A voice, 2 kHz', text: 'The same delay now makes a poor mirror image.', set: { mode: 'auto', f: 2000, tau: 60 } },
+        { label: 'Very high, 4 kHz', text: 'Above the crossover, the anti-noise makes things worse.', set: { mode: 'auto', f: 4000, tau: 60 } },
+      ],
+      quiz: [
+        { q: 'You add a sound wave to a copy of itself shifted by half a cycle. What do you hear?', opts: ['Twice as loud', 'Nothing at all, the waves cancel', 'The same as before', 'A higher pitch'], a: 1, why: 'A half-cycle shift turns every crest into a trough. At each instant the two add up to zero.' },
+        { q: 'Why do headphones cancel low rumble better than high-pitched sounds?', opts: ['High sounds are louder', 'A fixed electronic delay is a small fraction of a long, low-pitched wave but a big fraction of a short, high-pitched one', 'The microphone cannot hear high sounds', 'Low sounds are lighter'], a: 1, why: 'Phase error is 360° × f × τ. It grows in proportion to the pitch.' },
+        { q: 'The anti-noise is exactly as loud as the noise but 90° out of timing. What happens?', opts: ['Complete silence', 'Half as loud', 'About 1.4 times as loud', 'No change'], a: 2, why: '| 1 + e^{i 90°} | = √2, about 1.41. A poorly timed anti-noise adds to the noise.' },
+      ],
+      sources: [
+        'S. M. Kuo and D. R. Morgan, *Active Noise Control Systems*, Wiley (1996).',
+        'P. A. Nelson and S. J. Elliott, *Active Control of Sound*, Academic Press (1992).',
+      ],
+    },
+
+    create(host) {
+      const st = { u: 0 };
+      let L = null;
+
+      function params() {
+        const c = host.ctl;
+        if (c.mode === 'auto') { const e = An.electronic(c.f, c.tau); return { a: e.a, phi: e.phi, amp: e.amp }; }
+        const phi = (c.phase * Math.PI) / 180;
+        return { a: c.amp, phi, amp: An.residual(c.amp, phi) };
+      }
+
+      const sim = {
+        ref: { w: 780, h: 480 },
+        refNarrow: { w: 420, h: 770 },
+        state: st,
+        init() { st.u = 0; },
+        layout(V) {
+          L = V.narrow
+            ? { block: { x: 10, y: 6, w: 400, h: 70 }, tr: { x: 10, y: 94, w: 400, h: 270 }, chart: { x: 10, y: 480, w: 400, h: 240 }, meter: { x: 10, y: 392, w: 390 }, nums: { x: 12, y: 740 } }
+            : { block: { x: 10, y: 6, w: 500, h: 74 }, tr: { x: 10, y: 98, w: 500, h: 290 }, chart: { x: 530, y: 12, w: 242, h: 290 }, meter: { x: 10, y: 404, w: 500 }, nums: { x: 532, y: 336 } };
+        },
+        step(dt) { st.u += dt * 0.5; },
+        thumb() { st.u = 0.2; },
+        readouts() {
+          const p = params();
+          const f = host.ctl.f;
+          const db = An.toDb(p.amp);
+          return [
+            { k: 'Noise', v: '100 %' },
+            { k: 'You hear', v: fmt(p.amp * 100, 0) + ' %', tone: p.amp < 0.35 ? 'good' : p.amp > 1.02 ? 'bad' : 'warn' },
+            { k: 'Change', v: p.amp <= 1 ? fmt(db, 1) + ' dB quieter' : fmt(-db, 1) + ' dB louder', tone: p.amp <= 1 ? 'good' : 'bad' },
+            { k: 'Wavelength', v: fmt(SOUND / f, 2) + ' m' },
+            { k: 'One cycle lasts', v: fmt(1e6 / f, 0) + ' µs' },
+            { k: 'Delay is', v: fmt(host.ctl.tau * 1e-6 * f * 100, 1) + ' % of a cycle' },
+          ];
+        },
+        caption() { const p = params(); return p.amp < 0.1 ? 'Near silence' : p.amp < 0.5 ? 'Much quieter' : p.amp < 0.98 ? 'A bit quieter' : p.amp < 1.02 ? 'No change' : 'Louder!'; },
+        describe() { const p = params(); return 'You hear ' + fmt(p.amp * 100, 0) + ' percent of the noise, ' + (p.amp <= 1 ? fmt(An.toDb(p.amp), 1) + ' decibels quieter.' : fmt(-An.toDb(p.amp), 1) + ' decibels louder.'); },
+
+        draw(g, V, c) {
+          drawBlock(g, V, c);
+          drawTraces(g, V, c);
+          if (V.thumb) return;
+          drawMeter(g, V, c);
+          drawChart(g, V, c);
+        },
+      };
+
+      function box(g, V, c, x, y, w, h, title, sub, fill) {
+        g.fillStyle = fill || c.paper2; g.fillRect(x, y, w, h);
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.8); g.strokeRect(x, y, w, h);
+        text(g, V, title, x + w / 2, y + h / 2 - 2, { px: 11.5, weight: 800, align: 'center', halo: false });
+        text(g, V, sub, x + w / 2, y + h / 2 + 13, { px: 10, color: c.ink2, align: 'center', halo: false });
+      }
+      function drawBlock(g, V, c) {
+        const b = L.block;
+        const n = 4, gap = 26, bw = (b.w - gap * (n - 1)) / n, y = b.y + 6, h = b.h - 14;
+        const names = [['Microphone', 'hears the noise'], ['Flip + delay', 'invert, then τ late'], ['Speaker', 'plays anti-noise'], ['Your ear', 'noise + anti-noise']];
+        names.forEach((nm, i) => {
+          const x = b.x + i * (bw + gap);
+          box(g, V, c, x, y, bw, h, nm[0], nm[1], i === 1 ? alpha(c.accent, 0.45) : c.paper2);
+          if (i < n - 1) arrow(g, V, x + bw + 2, y + h / 2, x + bw + gap - 2, y + h / 2, c.ink, 2, 8);
+        });
+        if (host.ctl.mode === 'auto') text(g, V, 'τ = ' + host.ctl.tau + ' µs', b.x + 1 * (bw + gap) + bw / 2, y - 1, { px: 10.5, mono: true, align: 'center', weight: 800, halo: false });
+      }
+
+      function drawTraces(g, V, c) {
+        const t = L.tr;
+        const p = params();
+        const rows = [
+          { name: 'Noise from outside', col: c.hot, fn: (u) => Math.sin(2 * Math.PI * u) },
+          { name: 'Anti-noise from the speaker', col: c.cold, fn: (u) => p.a * Math.sin(2 * Math.PI * u + p.phi) },
+          { name: 'What you hear (the sum)', col: c.ink, fn: (u) => Math.sin(2 * Math.PI * u) + p.a * Math.sin(2 * Math.PI * u + p.phi), bold: true },
+        ];
+        const rh = (t.h - 6) / 3;
+        const ys = Math.max(1, 1 + Math.abs(p.a));
+        rows.forEach((r, i) => {
+          const y0 = t.y + i * (rh + 3), mid = y0 + rh / 2 + 8, amp = rh / 2 - 22;
+          g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(t.x, y0, t.w, rh);
+          g.strokeStyle = c.ink; g.lineWidth = V.px(1.4); g.strokeRect(t.x, y0, t.w, rh);
+          line(g, V, t.x, mid, t.x + t.w, mid, alpha(c.ink, 0.35), 1);
+          g.strokeStyle = r.col; g.lineWidth = V.px(r.bold ? 3 : 2.2); g.lineJoin = 'round'; g.beginPath();
+          for (let k = 0; k <= 200; k++) {
+            const u = (k / 200) * CYCLES;
+            const y = mid - (clamp(r.fn(u - st.u), -ys, ys) / ys) * amp;
+            if (k === 0) g.moveTo(t.x + (k / 200) * t.w, y); else g.lineTo(t.x + (k / 200) * t.w, y);
+          }
+          g.stroke();
+          text(g, V, r.name, t.x + 8, y0 + 14, { px: 10.5, weight: 800, color: r.col === c.ink ? c.ink : r.col });
+        });
+        text(g, V, 'the pictures run slowed down', t.x + t.w - 6, t.y + t.h + 14, { px: 10, color: c.ink2, align: 'right', halo: false });
+      }
+
+      function drawMeter(g, V, c) {
+        const m = L.meter;
+        const p = params();
+        text(g, V, 'How loud is it at your ear?', m.x, m.y + 4, { px: 12, weight: 700, halo: false });
+        const w = m.w - 6, y = m.y + 14;
+        g.fillStyle = alpha(c.hot, 0.3); g.fillRect(m.x, y, w * 0.62, 22);
+        text(g, V, 'noise = 100 %', m.x + 6, y + 15, { px: 10.5, weight: 700, halo: false });
+        const amp = clamp(p.amp, 0, 2);
+        g.fillStyle = p.amp > 1.02 ? c.bad : p.amp < 0.35 ? c.good : c.accent;
+        g.fillRect(m.x, y + 28, w * 0.62 * amp, 22);
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(m.x, y + 28, w * 0.62 * amp, 22);
+        text(g, V, 'you hear ' + fmt(p.amp * 100, 0) + ' %', m.x + w * 0.62 * amp + 6, y + 44, { px: 11.5, weight: 800, mono: true, halo: false });
+        line(g, V, m.x + w * 0.62, y - 4, m.x + w * 0.62, y + 54, c.ink, 1.4, [4, 3]);
+      }
+
+      function drawChart(g, V, c) {
+        const b = L.chart;
+        text(g, V, 'Noise reduction against pitch', b.x, b.y + 10, { px: 12, weight: 700, halo: false });
+        text(g, V, 'for an electronics delay of ' + host.ctl.tau + ' µs', b.x, b.y + 25, { px: 10.5, color: c.ink2, halo: false });
+        const x0 = b.x + 34, y0 = b.y + 34, w = b.w - 44, h = b.h - 68;
+        const F0 = Math.log10(30), F1 = Math.log10(8000), D0 = -12, D1 = 36;
+        const PX = (f) => x0 + ((Math.log10(f) - F0) / (F1 - F0)) * w, PY = (d) => y0 + h - ((d - D0) / (D1 - D0)) * h;
+        g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(x0, y0, w, h);
+        g.fillStyle = alpha(c.bad, 0.14); g.fillRect(x0, PY(0), w, y0 + h - PY(0));
+        for (const d of [0, 12, 24, 36]) { line(g, V, x0, PY(d), x0 + w, PY(d), alpha(c.ink, d === 0 ? 0.5 : 0.12), 1); text(g, V, d === 36 ? '36 dB' : String(d), x0 - 5, PY(d) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        for (const f of [100, 1000, 4000]) { line(g, V, PX(f), y0, PX(f), y0 + h, alpha(c.ink, 0.12), 1); text(g, V, f >= 1000 ? f / 1000 + 'k' : String(f), PX(f), y0 + h + 13, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); }
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(x0, y0, w, h);
+        g.strokeStyle = c.cold; g.lineWidth = V.px(2.6); g.beginPath();
+        let first = true;
+        for (let k = 0; k <= 160; k++) {
+          const f = Math.pow(10, F0 + (k / 160) * (F1 - F0));
+          const amp = An.electronic(f, host.ctl.tau).amp;
+          const d = clamp(An.toDb(amp), D0, D1);
+          if (first) { g.moveTo(PX(f), PY(d)); first = false; } else g.lineTo(PX(f), PY(d));
+        }
+        g.stroke();
+        const p = params();
+        const d = clamp(An.toDb(p.amp), D0, D1);
+        g.beginPath(); g.arc(PX(host.ctl.f), PY(d), V.px(6), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        text(g, V, 'quieter', x0 + w - 4, y0 + 13, { px: 10, color: c.good, weight: 700, align: 'right', halo: false });
+        text(g, V, 'louder', x0 + w - 4, y0 + h - 6, { px: 10, color: c.bad, weight: 700, align: 'right', halo: false });
+        text(g, V, 'pitch, Hz (log scale)', x0 + w, y0 + h + 28, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+                drawNums(g, V, c);
+      }
+
+      function drawNums(g, V, c) {
+        const n = L.nums, p = params();
+        const a = fmt(p.a, 2), ph = fmt(((p.phi * 180) / Math.PI + 360) % 360, 0);
+        text(g, V, 'residual = |1 + ' + a + ' e^(i ' + ph + '°)|', n.x, n.y, { px: 11.5, mono: true, weight: 700, halo: false });
+        text(g, V, '         = ' + fmt(p.amp, 2) + ' of the noise', n.x, n.y + 17, { px: 11.5, mono: true, color: p.amp > 1 ? c.bad : c.good, weight: 800, halo: false });
+        const ph2 = fmt(host.ctl.tau * 1e-6 * host.ctl.f * 360, 1);
+        text(g, V, 'delay error ' + ph2 + '° at this pitch', n.x, n.y + 38, { px: 11, color: c.ink2, halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/12-gps.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Gp = OM.gps;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, alpha } = OM.gfx;
+
+  const SATS = [{ x: -9.5, y: 9.5 }, { x: 10.5, y: 8.5 }, { x: 1, y: -11.5 }, { x: 12.5, y: -5 }];
+  const NOISE = [0.6, -0.9, 0.45, -0.25];
+
+  OM.register({
+    id: 'gps',
+    title: 'GPS',
+    group: 'signals',
+    hook: 'A stopwatch race. Distances from satellites pin you down, and your own clock error is the extra unknown that needs one more satellite.',
+    units: 'map units (1 unit ≈ 100 m)',
+    alt: 'A flat map with three or four satellites, a circle around each showing its measured distance, a draggable receiver, and a table of the solver steps that converge on the receiver position and clock error.',
+    controls: [
+      { id: 'n', type: 'seg', label: 'Satellites in view', value: 3, options: [{ v: 2, l: '2' }, { v: 3, l: '3' }, { v: 4, l: '4' }] },
+      { id: 'bias', type: 'range', label: 'Receiver clock error', min: -4, max: 4, step: 0.1, value: 1.5, dec: 1, unit: 'units', hint: 'Shown as extra distance. In real GPS one microsecond of clock error is about 300 m.' },
+      { id: 'noise', type: 'range', label: 'Measurement noise', min: 0, max: 0.8, step: 0.05, value: 0, dec: 2, unit: 'units' },
+      { id: 'mode', type: 'seg', label: 'Receiver', value: 'solve', options: [{ v: 'raw', l: 'Ignores its clock error' }, { v: 'solve', l: 'Solves for it' }] },
+      { id: 'replay', type: 'button', label: 'Replay the solver', playOnClick: true },
+    ],
+    content: {
+      intro: 'GPS is a stopwatch race. Each satellite says when it sent its signal, your receiver measures how long it took to arrive, and the distance is that time multiplied by the speed of light. Enough distances pin you down, once you also solve for your own clock error.',
+      steps: [
+        { h: 'One satellite: a circle', p: 'A single distance puts you somewhere on a circle around that satellite, and you cannot tell where.' },
+        { h: 'Two: two places', p: 'Two circles cross in two points. You are at one of them.' },
+        { h: 'Three: one point', p: 'A third circle picks out the point, provided your clock was perfect. Drag the receiver and watch the circles follow.' },
+        { h: 'The clock is never perfect', p: 'A clock error adds the same extra distance to every measurement, so the circles stop meeting at one point. The receiver treats the clock error as one more unknown and finds the one offset that makes all the circles meet. That is why it needs one more satellite than dimensions: three here, four in the real 3D world.' },
+      ],
+      principle: {
+        lead: 'Every measured distance is the true distance plus the same clock error. Three measurements give three equations for three unknowns: your x, your y and the clock error.',
+        eqs: [
+          { label: 'Measured (pseudo) range', eq: 'ρ~i~ = | r − s~i~ | + c b', note: 's~i~ is satellite i, r is you, and c b is the clock error turned into a distance.' },
+          { label: 'Unknowns and equations', eq: 'x, y, b  →  at least 3 satellites', note: 'In 3D it is x, y, z and b, so at least 4.' },
+          { label: 'Solving', eq: 'Δ = (HᵀH)⁻¹ Hᵀ (ρ − ρ̂)', note: 'Gauss–Newton: guess, see how wrong the ranges are, correct the guess, repeat. The table shows the steps.' },
+        ],
+        points: [
+          'Light travels 0.3 m in a nanosecond, so a receiver clock 100 ns out is 30 m out. That is why the clock has to be solved for and cannot simply be trusted.',
+          'Real satellite signals take about 70 milliseconds to arrive. The satellites carry atomic clocks and run 38 microseconds a day fast because of relativity, which would add up to 11 km of error a day if engineers did not correct for it.',
+          'The spread of the satellites matters. If they are bunched together the circles cross at shallow angles and the answer is uncertain. The solver reports this as the geometry factor (PDOP).',
+          '**What this model leaves out:** the third dimension, the atmosphere, satellite orbits moving and signal bounces from buildings. The numbers here are in map units.',
+        ],
+      },
+      myth: {
+        claim: 'GPS satellites track your phone and tell it where it is.',
+        truth: 'Satellites only broadcast. They do not know your phone exists. Your receiver listens to several of them and works out its own position, which is why GPS works in airplane mode and with no data connection.',
+      },
+      tries: [
+        { label: 'Perfect clock', text: 'With no clock error the three circles meet at one point.', set: { n: 3, bias: 0, noise: 0, mode: 'raw' } },
+        { label: 'Ignore the clock', text: 'A 2.5 unit clock error, and a receiver that does not allow for it.', set: { n: 3, bias: 2.5, noise: 0, mode: 'raw' } },
+        { label: 'Solve for it', text: 'The same error, but now the receiver finds the clock error and the circles meet again.', set: { n: 3, bias: 2.5, noise: 0, mode: 'solve' }, action: 'replay', play: true },
+        { label: 'Noisy ranges', text: 'Real measurements are never exact. More satellites average the noise down.', set: { n: 4, bias: 1.5, noise: 0.5, mode: 'solve' }, action: 'replay', play: true },
+        { label: 'Only two satellites', text: 'Not enough for x, y and the clock.', set: { n: 2, bias: 1.5, noise: 0 } },
+      ],
+      quiz: [
+        { q: 'How does a GPS receiver find its distance from a satellite?', opts: ['The satellite measures it and sends it', 'Time the signal took to arrive multiplied by the speed of light', 'From the phone signal strength', 'By comparing the satellite’s height'], a: 1, why: 'The signal says when it was sent. The receiver notes when it arrives, and the difference times c is the distance.' },
+        { q: 'Why does a GPS receiver need four satellites in the real 3D world, not just three?', opts: ['Three satellites cannot be seen at once', 'There is a fourth unknown, the receiver’s own clock error', 'To check the other three', 'To get the altitude only'], a: 1, why: 'The unknowns are x, y, z and the clock error. Four unknowns need four equations.' },
+        { q: 'Do GPS satellites know where your phone is?', opts: ['Yes, they track every phone', 'Only when the phone has data', 'No, they only broadcast and the receiver works out its own position', 'Only when you press navigate'], a: 2, why: 'It is one-way. That is why GPS works without any connection and why millions of receivers can use it at once.' },
+      ],
+      sources: [
+        'E. D. Kaplan and C. J. Hegarty (eds.), *Understanding GPS/GNSS: Principles and Applications*, Artech House (3rd edition, 2017).',
+        'N. Ashby, “Relativity in the Global Positioning System”, *Living Reviews in Relativity* 6 (2003).',
+      ],
+    },
+
+    create(host) {
+      const st = { pos: { x: 3, y: -1 }, k: 0, key: '', sol: null, raw: null, rho: [], sats: [], drag: false };
+      let L = null;
+
+      function solve() {
+        const c = host.ctl;
+        const key = [st.pos.x.toFixed(3), st.pos.y.toFixed(3), c.n, c.bias, c.noise].join('|');
+        if (key === st.key) return;
+        st.key = key;
+        st.sats = SATS.slice(0, c.n);
+        st.rho = Gp.pseudoranges(st.sats, st.pos, c.bias, st.sats.map((_, i) => NOISE[i] * c.noise));
+        st.sol = Gp.solve(st.sats, st.rho);
+        st.raw = Gp.solveXY(st.sats, st.rho);
+        st.k = 0;
+      }
+      const errOf = (p) => (p ? Math.hypot(p.x - st.pos.x, p.y - st.pos.y) : NaN);
+
+      const sim = {
+        ref: { w: 780, h: 470 },
+        refNarrow: { w: 420, h: 760 },
+        state: st,
+        drag: 'both',
+        init() { st.key = ''; st.k = 0; solve(); },
+        layout(V) {
+          L = V.narrow
+            ? { map: { x: 8, y: 6, w: 404, h: 404, s: 13.4 }, tab: { x: 14, y: 430, w: 392 }, facts: { x: 14, y: 620 } }
+            : { map: { x: 8, y: 8, w: 470, h: 454, s: 15.6 }, tab: { x: 498, y: 16, w: 274 }, facts: { x: 498, y: 268 } };
+        },
+        step(dt) { solve(); if (st.sol && st.sol.ok) st.k = Math.min(st.sol.path.length - 1, st.k + dt * 1.1); },
+        thumb() { solve(); st.k = 99; },
+        action(id) { if (id === 'replay') st.k = 0; },
+        pointer(type, x, y) {
+          const M = L.map;
+          const wx = (x - (M.x + M.w / 2)) / M.s, wy = -(y - (M.y + M.h / 2)) / M.s;
+          if (type === 'down') {
+            if (Math.hypot(wx - st.pos.x, wy - st.pos.y) * M.s > 26) return false;
+            st.drag = true; return true;
+          }
+          if (type === 'move' && st.drag) { st.pos.x = clamp(wx, -8, 8); st.pos.y = clamp(wy, -8, 8); solve(); }
+          if (type === 'up') st.drag = false;
+          return true;
+        },
+        cursor(x, y) {
+          const M = L.map;
+          const wx = (x - (M.x + M.w / 2)) / M.s, wy = -(y - (M.y + M.h / 2)) / M.s;
+          return Math.hypot(wx - st.pos.x, wy - st.pos.y) * M.s < 26 ? 'grab' : '';
+        },
+        key(k) {
+          const d = { ArrowLeft: [-0.5, 0], ArrowRight: [0.5, 0], ArrowUp: [0, 0.5], ArrowDown: [0, -0.5] }[k];
+          if (!d) return false;
+          st.pos.x = clamp(st.pos.x + d[0], -8, 8); st.pos.y = clamp(st.pos.y + d[1], -8, 8); solve();
+          return true;
+        },
+        readouts() {
+          solve();
+          const ok = st.sol && st.sol.ok;
+          return [
+            { k: 'Satellites', v: String(host.ctl.n) },
+            { k: 'True clock error', v: fmt(host.ctl.bias, 1) + ' units' },
+            { k: 'Receiver finds', v: ok ? fmt(st.sol.b, 2) + ' units' : 'cannot solve', tone: ok ? 'good' : 'bad' },
+            { k: 'Off if clock ignored', v: fmt(errOf(st.raw), 2) + ' units', tone: errOf(st.raw) > 0.3 ? 'warn' : 'good' },
+            { k: 'Off after solving', v: ok ? fmt(errOf(st.sol), 2) + ' units' : '–', tone: ok && errOf(st.sol) < 0.3 ? 'good' : '' },
+            { k: 'Solver steps', v: ok ? String(st.sol.path.length - 1) : '–' },
+            { k: 'Geometry (PDOP)', v: ok ? fmt(st.sol.pdop, 1) : '–', tone: ok && st.sol.pdop > 4 ? 'warn' : '' },
+          ];
+        },
+        caption() {
+          solve();
+          if (host.ctl.n < 3) return 'Not enough satellites';
+          return host.ctl.mode === 'solve' ? (st.k < st.sol.path.length - 1 ? 'Solver working…' : 'Circles meet') : 'Clock error ignored';
+        },
+        describe() { solve(); return host.ctl.n < 3 ? 'Only two satellites. Not enough to find a position and the clock error.' : 'Position error ' + fmt(errOf(host.ctl.mode === 'solve' ? st.sol : st.raw), 2) + ' units.'; },
+
+        draw(g, V, c) {
+          solve();
+          const M = L.map;
+          const cx = M.x + M.w / 2, cy = M.y + M.h / 2;
+          const X = (u) => cx + u * M.s, Y = (v) => cy - v * M.s;
+          g.save();
+          g.beginPath(); g.rect(M.x, M.y, M.w, M.h); g.clip();
+          g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(M.x, M.y, M.w, M.h);
+          for (let u = -14; u <= 14; u += 2) {
+            line(g, V, X(u), M.y, X(u), M.y + M.h, alpha(c.ink, u === 0 ? 0.3 : 0.1), 1);
+            line(g, V, M.x, Y(u), M.x + M.w, Y(u), alpha(c.ink, u === 0 ? 0.3 : 0.1), 1);
+          }
+          const ok = st.sol && st.sol.ok;
+          const solve_ = host.ctl.mode === 'solve' && ok;
+          // the solver path and the current estimate
+          let est = null, bk = 0;
+          if (solve_) {
+            const pth = st.sol.path;
+            const k0 = Math.floor(st.k), k1 = Math.min(pth.length - 1, k0 + 1), f = st.k - k0;
+            est = { x: pth[k0].x + (pth[k1].x - pth[k0].x) * f, y: pth[k0].y + (pth[k1].y - pth[k0].y) * f };
+            bk = pth[k0].b + (pth[k1].b - pth[k0].b) * f;
+          }
+          // circles
+          st.sats.forEach((s, i) => {
+            const rawR = st.rho[i] * M.s;
+            g.setLineDash([V.px(5), V.px(4)]); g.strokeStyle = alpha(c.cold, solve_ ? 0.45 : 0.95); g.lineWidth = V.px(solve_ ? 1.3 : 2.4);
+            g.beginPath(); g.arc(X(s.x), Y(s.y), rawR, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+            if (solve_) {
+              const r2 = Math.max(0, st.rho[i] - bk) * M.s;
+              g.strokeStyle = c.elec; g.lineWidth = V.px(2.6);
+              g.beginPath(); g.arc(X(s.x), Y(s.y), r2, 0, Math.PI * 2); g.stroke();
+            }
+          });
+          g.restore();
+          // satellites
+          st.sats.forEach((s, i) => {
+            const x = X(s.x), y = Y(s.y), r = V.px(9);
+            g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath();
+            g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+            text(g, V, 'S' + (i + 1), x, y - V.px(14), { px: 12, weight: 800, align: 'center' });
+          });
+          // the raw estimate that ignores the clock
+          if (st.raw && !solve_ && host.ctl.n >= 2) {
+            const ex = X(st.raw.x), ey = Y(st.raw.y);
+            line(g, V, X(st.pos.x), Y(st.pos.y), ex, ey, c.bad, 1.6, [4, 3]);
+            g.strokeStyle = c.bad; g.lineWidth = V.px(2.6);
+            g.beginPath(); g.moveTo(ex - V.px(7), ey - V.px(7)); g.lineTo(ex + V.px(7), ey + V.px(7)); g.moveTo(ex + V.px(7), ey - V.px(7)); g.lineTo(ex - V.px(7), ey + V.px(7)); g.stroke();
+            text(g, V, 'thinks it is here', ex + V.px(10), ey - V.px(8), { px: 11, weight: 800, color: c.bad });
+          }
+          if (est) {
+            const ex = X(est.x), ey = Y(est.y);
+            g.beginPath(); g.arc(ex, ey, V.px(8), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+            line(g, V, ex - V.px(14), ey, ex + V.px(14), ey, c.ink, 1.3); line(g, V, ex, ey - V.px(14), ex, ey + V.px(14), c.ink, 1.3);
+            text(g, V, 'receiver’s estimate', ex + V.px(14), ey - V.px(12), { px: 11, weight: 800 });
+          }
+          // the true receiver
+          g.beginPath(); g.arc(X(st.pos.x), Y(st.pos.y), V.px(7), 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2.6); g.stroke();
+          g.beginPath(); g.arc(X(st.pos.x), Y(st.pos.y), V.px(2.6), 0, Math.PI * 2); g.fillStyle = c.ink; g.fill();
+          text(g, V, 'you (drag me)', X(st.pos.x) - V.px(12), Y(st.pos.y) + V.px(24), { px: 11, weight: 700, align: 'right' });
+          g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(M.x, M.y, M.w, M.h);
+          if (host.ctl.n < 3) text(g, V, 'Two circles meet in two places, and the clock error is unknown.', cx, M.y + M.h - 14, { px: 12, weight: 800, align: 'center', color: c.bad });
+          if (V.thumb) return;
+          text(g, V, 'dashed blue: measured distances    teal: after removing the clock error', M.x + 6, M.y + M.h - 28 + (host.ctl.n < 3 ? -18 : 0), { px: 10.5, color: c.ink2, halo: true });
+          drawTable(g, V, c, ok);
+        },
+      };
+
+      function drawTable(g, V, c, ok) {
+        const T = L.tab;
+        text(g, V, 'What the solver does, step by step', T.x, T.y, { px: 12, weight: 700, halo: false });
+        const cols = [T.x, T.x + 34, T.x + 98, T.x + 162, T.x + 224];
+        ['step', 'x', 'y', 'clock', 'misfit'].forEach((h, i) => text(g, V, h, cols[i], T.y + 20, { px: 10, weight: 800, color: c.ink2, halo: false }));
+        line(g, V, T.x, T.y + 26, T.x + T.w, T.y + 26, c.ink, 1.2);
+        if (!ok) { text(g, V, host.ctl.n < 3 ? 'needs at least 3 satellites' : 'cannot solve', T.x, T.y + 48, { px: 12, color: c.bad, weight: 700, halo: false }); return; }
+        const path = st.sol.path;
+        const rows = Math.min(path.length, 7);
+        for (let i = 0; i < rows; i++) {
+          const y = T.y + 44 + i * 19;
+          const p = path[i];
+          const active = Math.floor(st.k) === i && host.ctl.mode === 'solve';
+          if (active) { g.fillStyle = alpha(c.accent, 0.55); g.fillRect(T.x - 4, y - 13, T.w + 6, 18); }
+          let ss = 0;
+          st.sats.forEach((s, j) => { const d = Math.hypot(p.x - s.x, p.y - s.y); ss += Math.pow(st.rho[j] - d - p.b, 2); });
+          const mis = Math.sqrt(ss / st.sats.length);
+          const cells = [String(i), fmt(p.x, 2), fmt(p.y, 2), fmt(p.b, 2), fmt(mis, 3)];
+          cells.forEach((t, j) => text(g, V, t, cols[j], y, { px: 11, mono: true, weight: active ? 800 : 500, halo: false }));
+        }
+        const fy = T.y + 44 + rows * 19 + 6;
+        text(g, V, 'truth: x ' + fmt(st.pos.x, 2) + ', y ' + fmt(st.pos.y, 2) + ', clock ' + fmt(host.ctl.bias, 2), T.x, fy, { px: 10.5, mono: true, color: c.ink2, halo: false });
+        text(g, V, 'misfit: how far the circles are from meeting', T.x, fy + 15, { px: 10, color: c.ink2, halo: false });
+        const F = L.facts;
+        const facts = ['Real signals take about 70 ms.', '1 ns of clock error = 0.3 m.', 'Satellite clocks gain 38 µs a day', 'from relativity: 11 km a day of', 'error if nobody corrected it.'];
+        facts.forEach((t, i) => text(g, V, t, F.x, F.y + i * 16, { px: 11, color: i < 2 ? c.ink : c.ink2, halo: false }));
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/13-orbit.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Ob = OM.orbit;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, alpha } = OM.gfx;
+
+  const R = Ob.RE;
+
+  OM.register({
+    id: 'orbit',
+    title: 'Orbits and Newton’s cannon',
+    group: 'signals',
+    hook: 'A satellite is not floating. It is falling, and moving sideways so fast that it keeps missing the ground.',
+    units: 'km, km/s, min, m/s²',
+    alt: 'Earth seen from above the pole with a cannon on a tower firing sideways. The shot follows a path that falls back, circles the Earth, swings out in an ellipse or escapes, depending on its speed. A chart shows circular orbit period against altitude.',
+    controls: [
+      { id: 'speed', type: 'range', label: 'Launch speed (sideways)', min: 0, max: 12, step: 0.05, value: 7.67, dec: 2, unit: 'km/s', hint: 'Orbit speed at 400 km is 7.67 km/s, about 27,600 km/h.' },
+      { id: 'alt', type: 'range', label: 'Launch height', min: 0, max: 2000, step: 50, value: 400, unit: 'km' },
+      { id: 'angle', type: 'range', label: 'Launch direction above level', min: -10, max: 60, step: 1, value: 0, unit: '°' },
+      { id: 'warp', type: 'seg', label: 'Time', value: 400, options: [{ v: 150, l: 'Slow' }, { v: 400, l: 'Normal' }, { v: 1500, l: 'Fast' }] },
+      { id: 'zoom', type: 'seg', label: 'View', value: 'near', options: [{ v: 'near', l: 'Near' }, { v: 'far', l: 'Far out' }] },
+      { id: 'fire', type: 'button', label: 'Fire again', primary: true, playOnClick: true },
+    ],
+    content: {
+      intro: 'Newton imagined a cannon on a very tall mountain. Fire it sideways and the ball curves down to the ground. Fire it faster and it lands farther away. Fire it fast enough and the ground curves away as quickly as the ball falls, so it never lands.',
+      steps: [
+        { h: 'Everything falls', p: 'Gravity pulls the ball towards the centre of the Earth all the time. A ball fired sideways falls just as fast as one dropped, it simply lands farther off.' },
+        { h: 'The ground curves away', p: 'The Earth is round. The faster the ball travels, the more the surface curves away underneath it before it can land.' },
+        { h: 'Fast enough and it never lands', p: 'At about 7.9 km/s at ground level (7.67 at 400 km up) the ground drops away as fast as the ball falls. The ball is in a circular orbit: always falling, always missing.' },
+        { h: 'Faster still', p: 'Go above circular speed and the path becomes an ellipse that swings out farther. Reach √2 times circular speed, 10.85 km/s up there, and you never come back.' },
+      ],
+      principle: {
+        lead: 'An orbit is nothing more than free fall with enough sideways speed. The same gravity that pulls an apple down keeps the Moon and the space station going round.',
+        eqs: [
+          { label: 'Gravity at distance r', eq: 'g = GM / r²', note: 'GM = 398,600 km³/s² for Earth. At 400 km up gravity is still 89 percent of its strength at the ground.' },
+          { label: 'Circular orbit speed', eq: 'v~c~ = √(GM / r)' },
+          { label: 'Escape speed', eq: 'v~esc~ = √2 × v~c~' },
+          { label: 'Period (Kepler’s third law)', eq: 'T = 2π √(a³ / GM)', note: 'a is the average distance from the centre. Low orbits go round quickly: 92 minutes at 400 km. Far ones take longer.' },
+        ],
+        points: [
+          'Higher orbits are slower, not faster. Speed falls as 1 ÷ √r, which is why the Moon crawls along at 1 km/s while the space station moves at 7.7.',
+          'A satellite at 35,786 km goes round once in 23.9 hours, the same as the Earth turns, so it hangs over one spot. That is the geostationary orbit.',
+          '**What this model leaves out:** air drag, the Earth’s slight bulge, the Moon and Sun, and the rocket needed to get up there. Here the launch is instant. The path is computed by stepping Newton’s law forward in time.',
+        ],
+      },
+      myth: {
+        claim: 'There is no gravity in space, which is why astronauts float.',
+        truth: 'At the space station’s height gravity is still about 89 percent as strong as on the ground. Astronauts float because they and the station are in free fall together, continuously falling around the Earth.',
+      },
+      tries: [
+        { label: 'Just drop it', text: 'No sideways speed. It falls straight down.', set: { speed: 0, alt: 400, angle: 0 } },
+        { label: 'A cannonball, 3 km/s', text: 'It curves down and lands far away.', set: { speed: 3, alt: 400, angle: 0 } },
+        { label: 'The space station', text: 'Circular orbit at 400 km. One lap takes 92 minutes.', set: { speed: 7.67, alt: 400, angle: 0 } },
+        { label: 'Faster: an ellipse', text: 'Above circular speed it swings out and comes back.', set: { speed: 9, alt: 400, angle: 0 } },
+        { label: 'Escape', text: 'Above 10.85 km/s at this height, it never returns.', set: { speed: 11, alt: 400, angle: 0 }, },
+      ],
+      quiz: [
+        { q: 'Why do astronauts on the space station float?', opts: ['There is no gravity up there', 'They and the station are in free fall together, going round the Earth', 'They are beyond the pull of the Moon', 'The station is spinning'], a: 1, why: 'Gravity at 400 km is about 89 percent of its ground value. Everything aboard is falling at the same rate, so nothing presses on anything else.' },
+        { q: 'Roughly how fast must a satellite move sideways to stay in low Earth orbit?', opts: ['About 800 km/h', 'About 8,000 km/h', 'About 28,000 km/h', 'About 280,000 km/h'], a: 2, why: '7.67 km/s is about 27,600 km/h.' },
+        { q: 'You launch faster than circular speed but slower than escape speed. What path do you follow?', opts: ['A straight line away', 'An ellipse that swings out farther and comes back', 'A smaller circle', 'A spiral into the ground'], a: 1, why: 'Bound orbits are ellipses with the Earth at one focus. Circular is the special case of an ellipse with no stretch.' },
+      ],
+      sources: [
+        'H. D. Curtis, *Orbital Mechanics for Engineering Students*, Butterworth-Heinemann.',
+        'I. Newton, *A Treatise of the System of the World* (the cannon thought experiment).',
+      ],
+    },
+
+    create(host) {
+      const st = { s: null, trail: [], status: 'flying', t: 0, cool: 0, pred: [], predKey: '', lastTrail: 0, crashAt: null, el: null };
+      let L = null;
+
+      const launch = () => {
+        const c = host.ctl, a = (c.angle * Math.PI) / 180;
+        return { x: 0, y: R + c.alt, vx: c.speed * Math.cos(a), vy: c.speed * Math.sin(a) };
+      };
+      function fire() {
+        st.s = launch(); st.trail = [[st.s.x, st.s.y]]; st.status = 'flying'; st.t = 0; st.cool = 0; st.lastTrail = 0; st.crashAt = null;
+        st.el = Ob.elements(st.s);
+        computePred();
+      }
+      function computePred() {
+        const s = launch(); const el = Ob.elements(s);
+        const pts = [[s.x, s.y]];
+        const dtStep = el.bound ? Math.max(15, el.period / 360) : 90;
+        const limit = el.bound ? Math.min(1.05 * el.period, 8 * 3600) : 12 * 3600;
+        let t = 0, hit = false;
+        while (t < limit && !hit) {
+          hit = Ob.advance(s, dtStep); t += dtStep;
+          pts.push([s.x, s.y]);
+          if (Math.hypot(s.x, s.y) > 40 * R) break;
+        }
+        st.pred = pts;
+        st.predHit = hit;
+        st.predKey = [host.ctl.speed, host.ctl.alt, host.ctl.angle].join('|');
+      }
+      const view = () => { const far = host.ctl.zoom === 'far'; const half = (far ? 9 : 2.3) * R; return { half, s: (L.map.h / 2 - 6) / half }; };
+
+      function result(el) {
+        if (el.rp < R - 1 && el.bound) return 'Falls back to Earth';
+        if (!el.bound) return 'Escapes the Earth';
+        if (el.e < 0.02) return 'Circular orbit';
+        return 'Elliptical orbit';
+      }
+
+      const sim = {
+        ref: { w: 780, h: 470 },
+        refNarrow: { w: 420, h: 830 },
+        state: st,
+        init() { fire(); },
+        layout(V) {
+          L = V.narrow
+            ? { map: { x: 6, y: 6, w: 408, h: 408 }, bar: { x: 14, y: 426, w: 392 }, chart: { x: 14, y: 560, w: 392, h: 250 } }
+            : { map: { x: 6, y: 8, w: 472, h: 454 }, bar: { x: 500, y: 12, w: 268 }, chart: { x: 500, y: 220, w: 268, h: 240 } };
+        },
+        step(dt) {
+          const key = [host.ctl.speed, host.ctl.alt, host.ctl.angle].join('|');
+          if (key !== st.predKey) fire();
+          if (st.status === 'flying') {
+            let left = dt * host.ctl.warp;
+            while (left > 0 && st.status === 'flying') {
+              const h = Math.min(left, 30);
+              const hit = Ob.advance(st.s, h);
+              st.t += h; left -= h;
+              if (st.t - st.lastTrail > 12) { st.trail.push([st.s.x, st.s.y]); st.lastTrail = st.t; if (st.trail.length > 1600) st.trail.shift(); }
+              if (hit) { st.status = 'crashed'; st.crashAt = [st.s.x, st.s.y]; }
+              else if (Math.hypot(st.s.x, st.s.y) > 40 * R) st.status = 'escaped';
+            }
+          } else { st.cool += dt; if (st.cool > 3.2) fire(); }
+        },
+        thumb() { fire(); for (let i = 0; i < 40; i++) sim.step(1 / 30); },
+        action(id) { if (id === 'fire') fire(); },
+        readouts() {
+          const c = host.ctl, r0 = R + c.alt;
+          const el = st.el || Ob.elements(launch());
+          const res = result(el);
+          const g = Ob.gAt(c.alt);
+          return [
+            { k: 'Result', v: res, tone: res.startsWith('Falls') ? 'bad' : res.startsWith('Escapes') ? 'warn' : 'good' },
+            { k: 'Circular speed here', v: fmt(Ob.circularSpeed(r0), 2) + ' km/s' },
+            { k: 'Escape speed here', v: fmt(Ob.escapeSpeed(r0), 2) + ' km/s' },
+            { k: 'One lap takes', v: el.bound && el.rp >= R - 1 ? fmt(el.period / 60, 0) + ' min' : '–' },
+            { k: 'Highest point', v: el.bound ? fmt(el.ra - R, 0) + ' km' : 'no limit' },
+            { k: 'Lowest point', v: el.rp >= R - 1 ? fmt(el.rp - R, 0) + ' km' : 'underground' },
+            { k: 'Gravity here', v: fmt(g, 2) + ' m/s² (' + fmt((g / Ob.G0) * 100, 0) + ' %)' },
+            { k: 'Flight time', v: fmt(st.t / 60, 0) + ' min' },
+          ];
+        },
+        caption() { return st.status === 'crashed' ? 'Hit the ground' : st.status === 'escaped' ? 'Gone for good' : result(st.el || Ob.elements(launch())); },
+        describe() { const el = st.el || Ob.elements(launch()); return result(el) + '. Launched at ' + fmt(host.ctl.speed, 2) + ' kilometres per second from ' + host.ctl.alt + ' kilometres up.'; },
+
+        draw(g, V, c) {
+          const M = L.map, cx = M.x + M.w / 2, cy = M.y + M.h / 2;
+          const vw = view();
+          const X = (x) => cx + x * vw.s, Y = (y) => cy - y * vw.s;
+          g.save();
+          g.beginPath(); g.rect(M.x, M.y, M.w, M.h); g.clip();
+          g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(M.x, M.y, M.w, M.h);
+          // faint stars
+          for (let i = 0; i < 60; i++) { const sx = M.x + ((i * 97.3) % M.w), sy = M.y + ((i * 61.7) % M.h); g.fillStyle = alpha(c.ink, 0.18); g.fillRect(sx, sy, 1.4, 1.4); }
+          // Earth and the edge of space
+          g.beginPath(); g.arc(cx, cy, R * vw.s, 0, Math.PI * 2);
+          g.fillStyle = alpha(c.cold, 0.3); g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+          g.beginPath(); g.arc(cx, cy, (R + 100) * vw.s, 0, Math.PI * 2); g.strokeStyle = alpha(c.ink2, 0.6); g.lineWidth = V.px(1); g.setLineDash([V.px(3), V.px(3)]); g.stroke(); g.setLineDash([]);
+          text(g, V, 'Earth', cx, cy + 4, { px: 13, weight: 800, align: 'center', color: c.ink, halo: false });
+          // predicted path
+          g.strokeStyle = alpha(c.ink, 0.45); g.lineWidth = V.px(1.6); g.setLineDash([V.px(5), V.px(4)]); g.beginPath();
+          st.pred.forEach((p, i) => (i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))));
+          g.stroke(); g.setLineDash([]);
+          // actual path
+          g.strokeStyle = c.ink; g.lineWidth = V.px(2.4); g.lineJoin = 'round'; g.beginPath();
+          st.trail.forEach((p, i) => (i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))));
+          if (st.s) g.lineTo(X(st.s.x), Y(st.s.y));
+          g.stroke();
+          // cannon and tower
+          const ls = launch(), a = (host.ctl.angle * Math.PI) / 180;
+          line(g, V, X(0), Y(R), X(0), Y(R + host.ctl.alt), c.ink, 2.4);
+          g.strokeStyle = c.ink; g.lineWidth = V.px(5); g.lineCap = 'round';
+          g.beginPath(); g.moveTo(X(0), Y(ls.y)); g.lineTo(X(0) + Math.cos(a) * V.px(18), Y(ls.y) - Math.sin(a) * V.px(18)); g.stroke(); g.lineCap = 'butt';
+          g.beginPath(); g.arc(X(0), Y(ls.y), V.px(5), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(1.6); g.stroke();
+          // the ball
+          if (st.s && st.status === 'flying') {
+            const bx = X(st.s.x), by = Y(st.s.y);
+            g.beginPath(); g.arc(bx, by, V.px(7), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2.2); g.stroke();
+            const sp = Math.hypot(st.s.vx, st.s.vy), r = Math.hypot(st.s.x, st.s.y);
+            if (sp > 0.01) arrow(g, V, bx, by, bx + (st.s.vx / sp) * V.px(14 + sp * 6), by - (st.s.vy / sp) * V.px(14 + sp * 6), c.elec, 2.6, 9);
+            const gg = Ob.gAt(r - R);
+            arrow(g, V, bx, by, bx - (st.s.x / r) * V.px(12 + gg * 3), by + (st.s.y / r) * V.px(12 + gg * 3), c.hot, 2.6, 9);
+          }
+          if (st.crashAt) {
+            const px = X(st.crashAt[0]), py = Y(st.crashAt[1]);
+            g.strokeStyle = c.bad; g.lineWidth = V.px(3);
+            g.beginPath(); g.moveTo(px - V.px(8), py - V.px(8)); g.lineTo(px + V.px(8), py + V.px(8)); g.moveTo(px + V.px(8), py - V.px(8)); g.lineTo(px - V.px(8), py + V.px(8)); g.stroke();
+            text(g, V, 'landed after ' + fmt(st.t / 60, 0) + ' min', px, py - V.px(14), { px: 12, weight: 800, align: 'center', color: c.bad });
+          }
+          if (st.status === 'escaped') text(g, V, 'escaped, never coming back', cx, M.y + 26, { px: 13, weight: 800, align: 'center', color: c.warn });
+          g.restore();
+          g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(M.x, M.y, M.w, M.h);
+          text(g, V, 'blue arrow: velocity   orange arrow: gravity   dashed: where it will go', M.x + 8, M.y + M.h - 10, { px: 10.5, color: c.ink2 });
+          text(g, V, 'dashed ring: edge of space, 100 km', M.x + 8, M.y + 16, { px: 10.5, color: c.ink2 });
+          if (V.thumb) return;
+          drawBar(g, V, c);
+          drawChart(g, V, c);
+        },
+      };
+
+      function drawBar(g, V, c) {
+        const b = L.bar, r0 = R + host.ctl.alt;
+        text(g, V, 'Launch speed at this height', b.x, b.y + 4, { px: 12, weight: 700, halo: false });
+        const vc = Ob.circularSpeed(r0), ve = Ob.escapeSpeed(r0);
+        const X = (v) => b.x + (v / 12) * (b.w - 4), y = b.y + 34, h = 26;
+        g.fillStyle = alpha(c.hot, 0.4); g.fillRect(X(0), y, X(vc) - X(0), h);
+        g.fillStyle = alpha(c.good, 0.45); g.fillRect(X(vc), y, X(ve) - X(vc), h);
+        g.fillStyle = alpha(c.cold, 0.4); g.fillRect(X(ve), y, X(12) - X(ve), h);
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(X(0), y, X(12) - X(0), h);
+        text(g, V, 'falls back', X(vc / 2), y + 17, { px: 10.5, weight: 800, align: 'center', halo: false });
+        text(g, V, 'orbits', X((vc + ve) / 2), y + 17, { px: 10.5, weight: 800, align: 'center', halo: false });
+        text(g, V, 'orange: falls back   green: orbits   blue: escapes', b.x, y + h + 48, { px: 10.5, color: c.ink2, halo: false });
+        text(g, V, fmt(vc, 2), X(vc), y + h + 30, { px: 10.5, mono: true, align: 'center', weight: 700, halo: false });
+        text(g, V, fmt(ve, 2), X(ve), y + h + 30, { px: 10.5, mono: true, align: 'center', weight: 700, halo: false });
+        for (const v of [0, 4, 8, 12]) text(g, V, String(v), X(v), y - 5, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false });
+        const sx = X(clamp(host.ctl.speed, 0, 12));
+        g.fillStyle = c.accent; g.strokeStyle = c.ink; g.lineWidth = V.px(2);
+        g.beginPath(); g.moveTo(sx, y + h + 3); g.lineTo(sx - V.px(7), y + h + V.px(15)); g.lineTo(sx + V.px(7), y + h + V.px(15)); g.closePath(); g.fill(); g.stroke();
+        const gg = Ob.gAt(host.ctl.alt);
+        text(g, V, 'Gravity here: ' + fmt(gg, 2) + ' m/s²', b.x, y + h + 70, { px: 12.5, weight: 800, mono: true, halo: false, color: c.hot });
+        text(g, V, fmt((gg / Ob.G0) * 100, 0) + ' % of its strength on the ground', b.x, y + h + 87, { px: 11.5, mono: true, halo: false, color: c.hot });
+      }
+
+      function drawChart(g, V, c) {
+        const b = L.chart;
+        text(g, V, 'Lap time for circular orbits', b.x, b.y + 10, { px: 12, weight: 700, halo: false });
+        const x0 = b.x + 34, y0 = b.y + 22, w = b.w - 46, h = b.h - 58;
+        const A1 = 40000, T1 = 28;
+        const PX = (alt) => x0 + (alt / A1) * w, PY = (hrs) => y0 + h - (hrs / T1) * h;
+        g.fillStyle = alpha(c.paper2, 0.9); g.fillRect(x0, y0, w, h);
+        for (const t of [0, 6, 12, 18, 24]) { line(g, V, x0, PY(t), x0 + w, PY(t), alpha(c.ink, 0.12), 1); text(g, V, String(t), x0 - 5, PY(t) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        for (const a of [0, 10000, 20000, 30000, 40000]) text(g, V, a === 0 ? '0' : a / 1000 + 'k', PX(a), y0 + h + 13, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false });
+        g.strokeStyle = c.ink; g.lineWidth = V.px(1.5); g.strokeRect(x0, y0, w, h);
+        const per = (alt) => (2 * Math.PI * Math.sqrt(Math.pow(R + alt, 3) / Ob.GM)) / 3600;
+        g.strokeStyle = c.cold; g.lineWidth = V.px(2.6); g.beginPath();
+        for (let a = 0; a <= A1; a += 250) { const t = per(a); if (a === 0) g.moveTo(PX(a), PY(t)); else g.lineTo(PX(a), PY(t)); }
+        g.stroke();
+        const marks = [[400, 'space station', 'left'], [20200, 'GPS', 'right'], [35786, 'geostationary', 'right']];
+        marks.forEach(([a, lab, al]) => {
+          g.beginPath(); g.arc(PX(a), PY(per(a)), V.px(4.5), 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(1.6); g.stroke();
+          text(g, V, lab + ' ' + fmt(per(a), a < 1000 ? 1 : 0) + ' h', PX(a) + (al === 'left' ? 8 : -8), PY(per(a)) + (al === 'left' ? -8 : 16), { px: 10.5, weight: 700, align: al, halo: true });
+        });
+        const cur = host.ctl.alt;
+        g.beginPath(); g.arc(PX(cur), PY(per(cur)), V.px(6), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        text(g, V, 'hours for one lap', x0 + 4, y0 + 14, { px: 10.5, color: c.ink2, halo: false });
+        text(g, V, 'height above the ground, km', x0 + w, y0 + h + 28, { px: 10.5, color: c.ink2, align: 'right', halo: false });
       }
       return sim;
     },

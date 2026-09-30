@@ -63,6 +63,30 @@
     return { ok: true, x, y, b, path, rms: Math.sqrt(ss / n), pdop };
   }
 
+  // Position only, pretending the receiver clock is perfect (b = 0). Shows the price of ignoring it.
+  function solveXY(sats, rho, guess) {
+    const n = sats.length;
+    if (n < 2) return null;
+    let x = guess ? guess.x : sats.reduce((s, p) => s + p.x, 0) / n;
+    let y = guess ? guess.y : sats.reduce((s, p) => s + p.y, 0) / n;
+    for (let it = 0; it < 40; it++) {
+      let a = 0, b = 0, d = 0, g1 = 0, g2 = 0;
+      for (let i = 0; i < n; i++) {
+        const dx = x - sats[i].x, dy = y - sats[i].y;
+        const r = Math.max(1e-9, Math.hypot(dx, dy));
+        const jx = dx / r, jy = dy / r, res = rho[i] - r;
+        a += jx * jx; b += jx * jy; d += jy * jy; g1 += jx * res; g2 += jy * res;
+      }
+      a += 1e-6; d += 1e-6;
+      const det = a * d - b * b;
+      if (Math.abs(det) < 1e-12) break;
+      const sx = (d * g1 - b * g2) / det, sy = (-b * g1 + a * g2) / det;
+      x += sx; y += sy;
+      if (Math.abs(sx) + Math.abs(sy) < 1e-9) break;
+    }
+    return { x, y };
+  }
+
   function pseudoranges(sats, pos, bias, noise) {
     return sats.map((s, i) => Math.hypot(pos.x - s.x, pos.y - s.y) + bias + (noise ? noise[i] : 0));
   }
@@ -71,7 +95,7 @@
   const REL = { gravity: 45.7e-6, velocity: -7.2e-6, perDay: 38.5e-6 };
   const driftKmPerDay = REL.perDay * C / 1000;
 
-  const api = { C, solve, pseudoranges, REL, driftKmPerDay };
+  const api = { C, solve, solveXY, pseudoranges, REL, driftKmPerDay };
   OM.gps = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

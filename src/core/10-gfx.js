@@ -99,13 +99,41 @@
   }
 
   // Text at a constant CSS pixel size. o: {px, color, align, base, weight, mono, halo}
+  // The label is measured and, if it would run off the canvas, shrunk (down to 74%)
+  // and then nudged back inside, so nothing is ever clipped at an edge.
   function text(g, V, s, x, y, o) {
     if (V.thumb) return;
     o = o || {};
-    const px = o.px || 12;
-    g.font = `${o.weight || 500} ${px / V.s}px ${o.mono ? OM.theme.mono : OM.theme.font}`;
-    g.textAlign = o.align || 'left';
+    let px = o.px || 12;
+    const fam = o.mono ? OM.theme.mono : OM.theme.font;
+    const wgt = o.weight || 500;
+    const align = o.align || 'left';
+    g.font = `${wgt} ${px / V.s}px ${fam}`;
+    g.textAlign = align;
     g.textBaseline = o.base || 'alphabetic';
+    if (V.cw && g.getTransform) {
+      const t = g.getTransform();
+      const k = t.a / V.dpr; // CSS pixels per drawing unit
+      let w = g.measureText(s).width * k;
+      const sx = (t.a * x + t.e) / V.dpr;
+      const span = () => {
+        const left = align === 'left' ? sx : align === 'right' ? sx - w : sx - w / 2;
+        return [left, left + w];
+      };
+      let [l, r] = span();
+      if (l < 2 || r > V.cw - 2) {
+        const room = align === 'left' ? V.cw - 2 - sx : align === 'right' ? sx - 2 : 2 * Math.min(sx - 2, V.cw - 2 - sx);
+        const f = Math.max(0.74, Math.min(1, room / w));
+        if (f < 1) {
+          px *= f; w *= f;
+          g.font = `${wgt} ${px / V.s}px ${fam}`;
+          [l, r] = span();
+        }
+        let dx = 0;
+        if (l < 2) dx = 2 - l; else if (r > V.cw - 2) dx = V.cw - 2 - r;
+        if (dx) x += (dx * V.dpr) / t.a;
+      }
+    }
     if (o.halo !== false) {
       g.lineJoin = 'round';
       g.lineWidth = 3.5 / V.s;
