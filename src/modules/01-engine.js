@@ -32,7 +32,7 @@
       intro: 'One cylinder, cut open. The piston goes down, up, down, up while the crank turns twice, and only one of those four strokes makes power.',
       steps: [
         { h: 'Intake', p: 'The piston moves down and the **intake valve** opens. Air and fuel are pushed in by the atmosphere, because the falling piston leaves the cylinder at lower pressure than outside.' },
-        { h: 'Compression', p: 'Both valves close and the piston rises, squeezing the mixture to about a tenth of its volume. Squeezing heats it and raises the pressure to around 18 bar. The spark fires just before the top.' },
+        { h: 'Compression', p: 'Both valves close and the piston rises, squeezing the mixture to about a tenth of its volume. Squeezing heats it and, by the top, would raise the pressure to roughly 16 to 18 bar. The spark fires just before that.' },
         { h: 'Power', p: 'A flame spreads out from the plug. The hot gas pushes the piston down with up to 50 bar on top of it. This is the only stroke that delivers work to the crank.' },
         { h: 'Exhaust', p: 'The **exhaust valve** opens well before the bottom of the power stroke so the pressure can leave, then the rising piston sweeps out what is left.' },
       ],

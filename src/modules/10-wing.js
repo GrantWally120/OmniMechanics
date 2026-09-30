@@ -66,7 +66,7 @@
         { label: 'Zero angle', text: 'The symmetric section makes no lift. The cambered one still does.', set: { aoa: 0 } },
         { label: 'Stall', text: 'Beyond 15° the lift drops and the air breaks away.', set: { aoa: 19, shape: 'cam' } },
         { label: 'Race the air', text: 'Which particle reaches the trailing edge first?', set: { aoa: 5, race: true } },
-        { label: 'Slow for landing', text: 'At half the speed you need nearly 4 times the lift coefficient.', set: { speed: 28, aoa: 12, race: false } },
+        { label: 'Slow for landing', text: 'At 28 m/s, even right at the stall angle this wing makes only about 70 percent of its cruise lift. Landing planes use flaps to get more.', set: { speed: 28, aoa: 15, race: false } },
       ],
       quiz: [
         { q: 'Which description of how a wing makes lift is correct?', opts: ['The air over the top must go faster to meet the air from underneath', 'The wing turns the airflow downwards, pressure is lower above and higher below, and the air pushes the wing up in return', 'The wing is sucked up into a vacuum above it', 'Air hits the underside like a skipping stone and nothing else matters'], a: 1, why: 'Pushing air down, lower pressure above and higher pressure below, and the circulation around the wing are all the same physics described from different angles. The equal-transit-time story is the one that is wrong.' },
