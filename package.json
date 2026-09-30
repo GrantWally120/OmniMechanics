@@ -1,0 +1,16 @@
+{
+  "name": "omnimechanics",
+  "version": "2.0.0",
+  "description": "OmniMechanics: interactive, physically grounded explainers of how things really work. Builds to one offline HTML file.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "node tests/e2e/run.cjs",
+    "check": "npm run build && npm test && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
