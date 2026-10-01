@@ -240,7 +240,7 @@
 
     // ---- controls
     const refs = {};
-    const controlsEl = h('section', { class: 'controls', 'aria-label': 'Controls for ' + def.title });
+    const controlsEl = h('section', { class: 'controls', 'aria-label': 'Controls for ' + def.title }, h('h2', { class: 'sr-only', text: 'Controls' }));
     const ctlNodes = [];
     def.controls.forEach((c) => {
       const node = buildControl(c);

@@ -10,7 +10,7 @@
   --paper-2: #f7f9f3;
   --ink: #14201a;
   --ink-2: #44554a;
-  --ink-3: #6b7a70;
+  --ink-3: #5a695f;
   --line: #c9d3c8;
   --line-strong: #94a598;
   --grid: rgba(24, 58, 42, 0.085);
@@ -186,6 +186,7 @@ button { font: inherit; color: inherit; }
 }
 .rail a:hover { background: var(--accent-soft); }
 .rail a[aria-current="page"] { border-left-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+.rail a[aria-current="page"] .rail-no { color: var(--ink); }
 .rail-no { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
 .rail-ck { width: 10px; height: 10px; border: 1.5px solid var(--line-strong); }
 .rail a.done .rail-ck { background: var(--c-good); border-color: var(--c-good); }

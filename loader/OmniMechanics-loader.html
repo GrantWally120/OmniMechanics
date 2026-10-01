@@ -57,7 +57,7 @@ button, .btn { font: inherit; font-weight: 700; color: var(--ink); background: v
 
   // a download counts only if it looks like the whole app, not an error page or half a file
   function looksRight(t) {
-    return typeof t === 'string' && t.length > 250000 && /<title>OmniMechanics/.test(t.slice(0, 4000)) && /<\/html>\s*$/.test(t);
+    return typeof t === 'string' && t.length > 200000 && /<title>OmniMechanics/.test(t.slice(0, 4000)) && /<\/html>\s*$/.test(t);
   }
 
   // ---- saved copy

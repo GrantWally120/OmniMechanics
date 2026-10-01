@@ -66,7 +66,7 @@
       if (mq.addEventListener) mq.addEventListener('change', on);
     }
 
-    menuBtn = h('button', { type: 'button', class: 'hbtn menu-btn', 'aria-expanded': 'false', 'aria-controls': 'rail' },
+    menuBtn = h('button', { type: 'button', class: 'hbtn menu-btn', 'aria-expanded': 'false', 'aria-controls': 'rail', 'aria-label': 'Mechanisms menu' },
       h('@svg', { viewBox: '0 0 24 24', width: 18, height: 18, 'aria-hidden': 'true', class: 'ico' }, h('@path', { d: 'M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z', fill: 'currentColor' })),
       h('span', { class: 'hbtn-lbl', text: 'Mechanisms' }));
     menuBtn.addEventListener('click', () => toggleRail());
@@ -297,6 +297,14 @@
     return () => { dead = true; cancelAnimationFrame(raf); if (ro) ro.disconnect(); if (io) io.disconnect(); off(); };
   }
 
+  // A box that can scroll sideways must also be reachable with the keyboard, but only when it really overflows.
+  function scrollable(el) {
+    const check = () => { el.tabIndex = el.scrollWidth > el.clientWidth + 1 ? 0 : -1; };
+    if (typeof ResizeObserver === 'function') new ResizeObserver(check).observe(el);
+    requestAnimationFrame(check);
+    return el;
+  }
+
   function section(id, title, kids) {
     return h('section', { class: 'notes-sec', 'aria-labelledby': id }, h('h2', { id, text: title }), kids);
   }
@@ -335,7 +343,7 @@
       p.lead ? h('p', { class: 'lead' }, rich(p.lead)) : null,
       (p.eqs || []).map((e) => h('figure', { class: 'eq' },
         h('figcaption', { text: e.label }),
-        h('div', { class: 'eq-line' }, rich(e.eq)),
+        scrollable(h('div', { class: 'eq-line', role: 'group', 'aria-label': e.label }, rich(e.eq))),
         e.note ? h('p', { class: 'eq-note' }, rich(e.note)) : null)),
       p.points ? h('ul', { class: 'points' }, p.points.map((x) => h('li', null, rich(x)))) : null,
     ]);

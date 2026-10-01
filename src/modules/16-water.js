@@ -323,14 +323,13 @@
         const m = model();
         const a = m.asc;
         const ridge = host.ctl.ridge;
-        const f = plotFrame(g, V, c, L.temp, 'Temperature of the air against height', 'temperature, °C', '');
+        const f = plotFrame(g, V, c, L.temp, 'Temperature of the air against height (m)', 'temperature, °C', '');
         const TMIN = -25, TMAX = 50;
         const X = (t) => f.x0 + ((t - TMIN) / (TMAX - TMIN)) * f.w;
         const Y = (z) => f.y0 + f.h - (z / Z_MAX) * f.h;
         for (const t of [-20, 0, 20, 40]) { line(g, V, X(t), f.y0 + f.h, X(t), f.y0 + f.h + 4, c.ink, 1); text(g, V, String(t), X(t), f.y0 + f.h + 15, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); }
         for (const z of [0, 1000, 2000, 3000]) { line(g, V, f.x0 - 4, Y(z), f.x0, Y(z), c.ink, 1); text(g, V, fmt(z, 0), f.x0 - 6, Y(z) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); line(g, V, f.x0, Y(z), f.x0 + f.w, Y(z), alpha(c.ink3, 0.25), 1, [2, 4]); }
-        text(g, V, 'height, m', f.x0 + 6, f.y0 + 10, { px: 10, color: c.ink2, halo: false });
-        // the ridge
+                // the ridge
         if (ridge > 0) {
           g.fillStyle = alpha(c.ink, 0.08);
           g.fillRect(f.x0, f.y0 + f.h - (ridge / Z_MAX) * f.h, f.w, (ridge / Z_MAX) * f.h);
@@ -368,7 +367,7 @@
           // markers
           const dot = (x, y, col) => { g.beginPath(); g.arc(x, y, V.px(5.5), 0, Math.PI * 2); g.fillStyle = col; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(1.8); g.stroke(); };
           dot(X(a.tAir), Y(0), c.accent);
-          if (a.cloud) { dot(X(t0 - Wa.GAMMA_D * a.zLcl), Y(a.zLcl), c.paper); text(g, V, 'cloud base', X(t0 - Wa.GAMMA_D * a.zLcl) - 10, Y(a.zLcl) + 4, { px: 10.5, color: c.cold, weight: 700, align: 'right' }); }
+          if (a.cloud) { dot(X(t0 - Wa.GAMMA_D * a.zLcl), Y(a.zLcl), c.paper); text(g, V, 'cloud base', X(t0 - Wa.GAMMA_D * a.zLcl) - 10, Y(a.zLcl) - 2, { px: 10.5, color: c.cold, weight: 700, align: 'right' }); }
           dot(X(a.Ttop), Y(ridge), c.accent);
           dot(X(m.lee.T), Y(0), c.hot);
           text(g, V, 'sea', X(a.tAir) - 8, Y(0) - 8, { px: 10.5, color: c.ink2, align: 'right', halo: false });
