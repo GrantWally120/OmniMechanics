@@ -105,7 +105,7 @@ async function stress(id) {
     await page.waitForSelector('.card');
     ids = await page.evaluate(() => OM.mods.map((m) => m.id));
     console.log('Mechanisms: ' + ids.length + ' (' + ids.join(', ') + ')');
-    if (ids.length !== 13) fail('registry', 'expected 13 mechanisms, found ' + ids.length);
+    if (ids.length !== 16) fail('registry', 'expected 16 mechanisms, found ' + ids.length);
     if (new Set(ids).size !== ids.length) fail('registry', 'duplicate ids');
     await page.waitForTimeout(800);
     const thumbs = await page.evaluate(() => Array.from(document.querySelectorAll('canvas.thumb')).map((c) => { const g = c.getContext('2d'); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 28) if (d[i] > 0) n++; return n / (d.length / 28); }));

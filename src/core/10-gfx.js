@@ -232,7 +232,18 @@
     });
   }
 
+  // Axes for a small chart inside rect r = {x, y, w, h}. Returns the plot area.
+  function plotFrame(g, V, c, r, title, xl, yl) {
+    text(g, V, title, r.x, r.y + 10, { px: 12, weight: 700, halo: false });
+    const x0 = r.x + 40, y0 = r.y + 22, w = r.w - 52, h = r.h - 54;
+    line(g, V, x0, y0, x0, y0 + h, c.ink, 1.5);
+    line(g, V, x0, y0 + h, x0 + w, y0 + h, c.ink, 1.5);
+    if (xl) text(g, V, xl, x0 + w, y0 + h + 28, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+    if (yl) text(g, V, yl, x0 - 6, y0 - 4, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+    return { x0, y0, w, h };
+  }
+
   OM.theme = theme;
-  OM.gfx = { alpha, mix, parse, rrect, line, arrow, text, hatchRect, spring, dim, dot, pairBars };
+  OM.gfx = { alpha, mix, parse, rrect, line, arrow, text, hatchRect, spring, dim, dot, pairBars, plotFrame };
   if (typeof module !== 'undefined' && module.exports) module.exports = OM.gfx;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

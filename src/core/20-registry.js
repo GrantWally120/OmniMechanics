@@ -55,9 +55,18 @@
     return def;
   }
 
+  // Once every module has registered: list them group by group (files within a group keep
+  // their load order) and number them in that order, so the numbers read 01, 02, 03 down the page.
+  function finalize() {
+    const gi = (m) => groups.findIndex((g) => g.id === m.group);
+    mods.sort((a, b) => gi(a) - gi(b) || a.order - b.order);
+    mods.forEach((m, i) => { m.order = i; m.number = 'OM-' + String(i + 1).padStart(2, '0'); });
+  }
+
   OM.groups = groups;
   OM.mods = mods;
   OM.register = register;
+  OM.finalize = finalize;
   OM.getMod = (id) => mods.find((m) => m.id === id) || null;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { groups, mods, register };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { groups, mods, register, finalize };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

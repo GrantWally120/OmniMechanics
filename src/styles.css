@@ -364,7 +364,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
 .ctl-button { align-content: end; }
 
 /* ---------------------------------------------------------------- notes */
-.notes-sec { display: grid; gap: var(--space-4); }
+.notes-sec { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); }
 .notes-sec > h2, .myth h2 { font-stretch: 118%; font-weight: 800; font-size: 22px; letter-spacing: -0.005em; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); counter-reset: step; }
 .step { position: relative; padding: var(--space-3) var(--space-4) var(--space-3) 52px; border: 1.5px solid var(--line-strong); border-radius: var(--radius); background: var(--paper-2); counter-increment: step; }

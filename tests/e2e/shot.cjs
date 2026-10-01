@@ -1,5 +1,6 @@
 'use strict';
 // Usage: node tests/e2e/shot.cjs <route> <width> <height> <light|dark> <out.png> [advanceSeconds] [fullPage]
+// Env: DSF=device scale factor, SEL=css selector to capture, SET='{"rpm":3600}' to change controls first.
 const path = require('node:path');
 let pw;
 try { pw = require('playwright'); } catch (e) { pw = require('/opt/node22/lib/node_modules/playwright'); }
@@ -15,6 +16,10 @@ try { pw = require('playwright'); } catch (e) { pw = require('/opt/node22/lib/no
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   await page.goto(file + (route ? '#' + route : ''));
   await page.waitForTimeout(700);
+  if (process.env.SET) {
+    await page.evaluate((o) => OM.debug.stage.applyPreset({ label: 'shot', reset: true, set: o }), JSON.parse(process.env.SET));
+    await page.waitForTimeout(100);
+  }
   if (+adv > 0) {
     await page.evaluate((s) => { if (OM.debug.stage) OM.debug.stage.advance(s); }, +adv);
     await page.waitForTimeout(150);

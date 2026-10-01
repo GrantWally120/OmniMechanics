@@ -1,6 +1,6 @@
 # OmniMechanics
 
-**How things really work.** Thirteen interactive drawings of machines, circuits and systems. Each is a live
+**How things really work.** Sixteen interactive drawings of machines, circuits and systems. Each is a live
 simulation built on the equations engineers use, with the numbers next to the picture, the common myth it
 busts, a few "try this" experiments and a short quiz.
 
@@ -17,14 +17,17 @@ blueprint, and it follows your system setting or the toggle in the header.
 | 03 | Pulleys, block and tackle | Rope tensions, mechanical advantage, friction, work in = work out |
 | 04 | Hydraulic jack and brakes | Pascal's principle, force against travel, why air makes a pedal spongy |
 | 05 | Pin tumbler lock | Shear line, key cuts, why exactly one of 59,049 keys opens it |
-| 06 | DC electric motor | Lorentz force, commutator, back-EMF, stall current, torque ripple |
-| 07 | Transformer | Turns ratio, flux density, core saturation, what happens with DC |
-| 08 | Adding with logic gates | XOR/AND/OR full adder, ripple carry with visible gate delay |
-| 09 | Refrigerator | R-134a vapour-compression loop, P–h diagram, thermostat cycling, COP |
-| 10 | Airplane wing | Exact potential flow round a Joukowski wing, pressure map, the transit-time myth, stall |
-| 11 | Noise-cancelling headphones | Cancellation by delay, why low pitches work and high ones do not |
-| 12 | GPS | Pseudoranges, solving for the clock error, Gauss–Newton step by step |
-| 13 | Orbits and Newton's cannon | Free fall with sideways speed, circular, elliptical and escape orbits |
+| 06 | Cam and follower | Motion laws, pressure angle, undercut, and the follower leaving the cam ("valve float") when it spins too fast |
+| 07 | Pendulum clock escapement | Dead-beat escapement with real pallet contact, exact period at any swing, drive against drag, rate error |
+| 08 | DC electric motor | Lorentz force, commutator, back-EMF, stall current, torque ripple |
+| 09 | Transformer | Turns ratio, flux density, core saturation, what happens with DC |
+| 10 | Adding with logic gates | XOR/AND/OR full adder, ripple carry with visible gate delay |
+| 11 | Refrigerator | R-134a vapour-compression loop, P–h diagram, thermostat cycling, COP |
+| 12 | Airplane wing | Exact potential flow round a Joukowski wing, pressure map, the transit-time myth, stall |
+| 13 | The water cycle over a mountain | Evaporation, cloud base, latent heat, orographic rain and the rain shadow on the far side |
+| 14 | Noise-cancelling headphones | Cancellation by delay, why low pitches work and high ones do not |
+| 15 | GPS | Pseudoranges, solving for the clock error, Gauss–Newton step by step |
+| 16 | Orbits and Newton's cannon | Free fall with sideways speed, circular, elliptical and escape orbits |
 
 ## Accuracy
 
@@ -37,6 +40,9 @@ Every model in `src/lib/` is plain JavaScript that is unit-tested against known 
 * fridge: R-134a saturation pressure within 2% of table values, COP below the Carnot limit, heat balance closes
 * orbit: energy conserved over many orbits, period from Kepler's third law, escape speed √2 × circular speed
 * adder: every one of the 512 inputs gives the right sum
+* cam: peak-acceleration coefficients 4.0, 4.93 and 6.28 for the three motion laws, the follower leaves the cam at exactly the speed where the contact force first goes negative, and a cam with a roller bigger than its tip is flagged as undercut
+* escapement: exact period ratios (1.0174 at 30°, 1.1803 at 90°), a 0.994 m pendulum beats seconds, a 30-tooth wheel turns once a minute, energy in equals energy lost at the working swing, and no pallet ever passes through a tooth
+* water cycle: vapour pressure against tables, Bolton cloud base against the 125 m per degree rule, the far side is warmer by exactly the latent heat released, evaporation about 4 mm and 120 W/m² for a warm sea
 
 Each page also states what its model leaves out. These are realistic teaching numbers, not design data.
 
@@ -46,7 +52,7 @@ Needs Node 20 or newer. No dependencies to install.
 
 ```
 node build.mjs              # writes OmniMechanics.html
-npm test                    # 41 physics unit tests (node:test)
+npm test                    # 75 physics unit tests (node:test)
 node tests/e2e/run.cjs      # browser test, needs Playwright + Chromium
 ```
 
@@ -69,7 +75,7 @@ tests/e2e/            browser tests
 
 ### Adding a mechanism
 
-Create `src/modules/14-name.js` and call `OM.register({...})` with an id, title, group, hook, units, a list of
+Create `src/modules/17-name.js` and call `OM.register({...})` with an id, title, group, hook, units, a list of
 `controls`, a `content` block (steps, principle, myth, tries, quiz) and a `create(host)` that returns the
 simulation (`ref`, `init`, `step`, `draw`, `readouts`, optional `pointer`/`key`). The registry validates the
 shape, the library card and thumbnail appear on their own, and the browser test picks it up automatically.

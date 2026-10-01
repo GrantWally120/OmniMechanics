@@ -375,7 +375,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
 .ctl-button { align-content: end; }
 
 /* ---------------------------------------------------------------- notes */
-.notes-sec { display: grid; gap: var(--space-4); }
+.notes-sec { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); }
 .notes-sec > h2, .myth h2 { font-stretch: 118%; font-weight: 800; font-size: 22px; letter-spacing: -0.005em; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); counter-reset: step; }
 .step { position: relative; padding: var(--space-3) var(--space-4) var(--space-3) 52px; border: 1.5px solid var(--line-strong); border-radius: var(--radius); background: var(--paper-2); counter-increment: step; }
@@ -797,8 +797,19 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
     });
   }
 
+  // Axes for a small chart inside rect r = {x, y, w, h}. Returns the plot area.
+  function plotFrame(g, V, c, r, title, xl, yl) {
+    text(g, V, title, r.x, r.y + 10, { px: 12, weight: 700, halo: false });
+    const x0 = r.x + 40, y0 = r.y + 22, w = r.w - 52, h = r.h - 54;
+    line(g, V, x0, y0, x0, y0 + h, c.ink, 1.5);
+    line(g, V, x0, y0 + h, x0 + w, y0 + h, c.ink, 1.5);
+    if (xl) text(g, V, xl, x0 + w, y0 + h + 28, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+    if (yl) text(g, V, yl, x0 - 6, y0 - 4, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+    return { x0, y0, w, h };
+  }
+
   OM.theme = theme;
-  OM.gfx = { alpha, mix, parse, rrect, line, arrow, text, hatchRect, spring, dim, dot, pairBars };
+  OM.gfx = { alpha, mix, parse, rrect, line, arrow, text, hatchRect, spring, dim, dot, pairBars, plotFrame };
   if (typeof module !== 'undefined' && module.exports) module.exports = OM.gfx;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
@@ -860,11 +871,20 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
     return def;
   }
 
+  // Once every module has registered: list them group by group (files within a group keep
+  // their load order) and number them in that order, so the numbers read 01, 02, 03 down the page.
+  function finalize() {
+    const gi = (m) => groups.findIndex((g) => g.id === m.group);
+    mods.sort((a, b) => gi(a) - gi(b) || a.order - b.order);
+    mods.forEach((m, i) => { m.order = i; m.number = 'OM-' + String(i + 1).padStart(2, '0'); });
+  }
+
   OM.groups = groups;
   OM.mods = mods;
   OM.register = register;
+  OM.finalize = finalize;
   OM.getMod = (id) => mods.find((m) => m.id === id) || null;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { groups, mods, register };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { groups, mods, register, finalize };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
 /* ---- lib/airfoil.js ---- */
@@ -1132,6 +1152,202 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ---- lib/cam.js ---- */
+/* Cam and follower.
+ *
+ * A cam turns at a steady speed and an in-line roller follower rides on it.
+ * The follower program is: rise (beta), dwell at the top, fall (beta), dwell
+ * at the bottom. Three classic laws describe the rise and fall. Everything is
+ * in SI units (metres, kilograms, newtons, radians).
+ *
+ * Geometry. The roller centre moves on the pitch curve, radius Rp = Rb + Rr + y.
+ * The cam outline is that curve pushed inward by the roller radius Rr, along
+ * the curve normal. If the pitch curve bends more sharply than the roller
+ * (radius of curvature below Rr) the outline develops cusps: the cam is
+ * "undercut" and cannot be cut that way.
+ *
+ * Forces. The spring pushes the follower onto the cam, so the cam can only
+ * push. The contact force is
+ *     N = m y'' + F0 + k y + m g
+ * and when that would go negative the follower leaves the cam ("float").
+ * advance() integrates the follower through free flight and landings. */
+(function (root) {
+  'use strict';
+  const OM = root.OM || (root.OM = {});
+  const TAU = Math.PI * 2;
+  const G = 9.80665;
+  const DWELL_TOP = (30 * Math.PI) / 180;
+  const MAX_DT = 2e-5;
+
+  // Unit laws on s in [0,1]: position f, then d/ds and d2/ds2.
+  const LAWS = {
+    cycloidal: (s) => ({ f: s - Math.sin(TAU * s) / TAU, d: 1 - Math.cos(TAU * s), dd: TAU * Math.sin(TAU * s) }),
+    harmonic: (s) => ({ f: (1 - Math.cos(Math.PI * s)) / 2, d: (Math.PI / 2) * Math.sin(Math.PI * s), dd: ((Math.PI * Math.PI) / 2) * Math.cos(Math.PI * s) }),
+    parabolic: (s) => (s < 0.5
+      ? { f: 2 * s * s, d: 4 * s, dd: 4 }
+      : { f: 1 - 2 * (1 - s) * (1 - s), d: 4 * (1 - s), dd: -4 }),
+  };
+  // Peak acceleration coefficient: a_max = C h / beta^2 (per rad^2).
+  const COEF = { cycloidal: TAU, harmonic: (Math.PI * Math.PI) / 2, parabolic: 4 };
+
+  const wrap = (a) => { const t = a % TAU; return t < 0 ? t + TAU : t; };
+
+  // p = { lift, rise, law, rb, rr, mass, k, preload, dwell? }
+  function dwellTop(p) { return p.dwell == null ? DWELL_TOP : p.dwell; }
+
+  // Follower lift and its first two derivatives with respect to cam angle theta.
+  function motion(p, theta) {
+    const th = wrap(theta);
+    const b = p.rise;
+    const law = LAWS[p.law];
+    if (th < b) {
+      const r = law(th / b);
+      return { y: p.lift * r.f, dy: (p.lift * r.d) / b, ddy: (p.lift * r.dd) / (b * b) };
+    }
+    const t1 = b + dwellTop(p);
+    if (th < t1) return { y: p.lift, dy: 0, ddy: 0 };
+    if (th < t1 + b) {
+      const r = law(1 - (th - t1) / b);
+      return { y: p.lift * r.f, dy: (-p.lift * r.d) / b, ddy: (p.lift * r.dd) / (b * b) };
+    }
+    return { y: 0, dy: 0, ddy: 0 };
+  }
+
+  // 0 bottom dwell, 1 rise, 2 top dwell, 3 fall.
+  function phaseAt(p, theta) {
+    const th = wrap(theta);
+    const b = p.rise;
+    const t1 = b + dwellTop(p);
+    if (th < b) return 1;
+    if (th < t1) return 2;
+    if (th < t1 + b) return 3;
+    return 0;
+  }
+
+  function bottomDwell(p) { return TAU - 2 * p.rise - dwellTop(p); }
+
+  function pressureAngle(p, theta) {
+    const m = motion(p, theta);
+    return Math.atan2(Math.abs(m.dy), p.rb + p.rr + m.y);
+  }
+
+  // Force between cam and follower at cam speed omega (rad/s).
+  function contactForce(p, theta, omega) {
+    const m = motion(p, theta);
+    return p.mass * m.ddy * omega * omega + p.preload + p.k * m.y + p.mass * G;
+  }
+
+  const SAMPLES = 1440;
+
+  // Peak values over one revolution and the speed at which the follower floats.
+  function analyse(p, n) {
+    n = n || SAMPLES;
+    let vmax = 0, amax = 0, phimax = 0, ratio = Infinity;
+    for (let i = 0; i < n; i++) {
+      const th = (i / n) * TAU;
+      const m = motion(p, th);
+      vmax = Math.max(vmax, Math.abs(m.dy));
+      amax = Math.max(amax, Math.abs(m.ddy));
+      phimax = Math.max(phimax, Math.atan2(Math.abs(m.dy), p.rb + p.rr + m.y));
+      if (m.ddy < -1e-12) ratio = Math.min(ratio, (p.preload + p.k * m.y + p.mass * G) / (p.mass * -m.ddy));
+    }
+    const omega = Math.sqrt(ratio);
+    return {
+      vmax, amax, phimax,
+      floatOmega: omega,
+      floatRpm: (omega * 60) / TAU,
+    };
+  }
+
+  // Geometry at cam-frame angle psi, measured clockwise from "up" with x, y on
+  // canvas axes (y points down): the pitch point, the matching cam surface point
+  // and the outward normal. The roller centre sits at psi = -theta.
+  function surface(p, psi) {
+    const m = motion(p, -psi);
+    const P = p.rb + p.rr + m.y;
+    const dP = -m.dy;
+    const ddP = m.ddy;
+    const sx = Math.sin(psi), sy = -Math.cos(psi); // radial direction
+    const tx = Math.cos(psi), ty = Math.sin(psi);  // direction of increasing psi
+    const len = Math.hypot(P, dP);
+    const nx = (P * sx - dP * tx) / len;
+    const ny = (P * sy - dP * ty) / len;
+    const den = P * P + 2 * dP * dP - P * ddP;
+    return {
+      pitch: { x: P * sx, y: P * sy },
+      cam: { x: P * sx - p.rr * nx, y: P * sy - p.rr * ny },
+      nx, ny,
+      rho: den > 1e-12 ? Math.pow(P * P + dP * dP, 1.5) / den : Infinity, // convex points only
+    };
+  }
+
+  // The whole pitch curve and cam outline, plus the tightest bend (for undercut).
+  function outline(p, n) {
+    n = n || 720;
+    const pitch = [], out = [];
+    let minRho = Infinity;
+    for (let i = 0; i < n; i++) {
+      const s = surface(p, (i / n) * TAU);
+      pitch.push(s.pitch);
+      out.push(s.cam);
+      minRho = Math.min(minRho, s.rho);
+    }
+    return { pitch, cam: out, minRho, undercut: minRho < p.rr - 1e-9 };
+  }
+
+  // ---------------------------------------------------------------- follower
+  function createFollower(p, theta, omega) {
+    const m = motion(p, theta);
+    const w = omega || 0;
+    return {
+      y: m.y, v: m.dy * w, contact: true,
+      N: p.mass * m.ddy * w * w + p.preload + p.k * m.y + p.mass * G,
+      impact: 0, floating: false,
+    };
+  }
+
+  // Advance the cam by dtheta (>= 0) at steady speed omega, starting at angle
+  // theta. Returns the new cam angle. Integrates the follower in small steps of
+  // real time: in contact it follows the cam, otherwise it flies on the spring.
+  function advance(st, p, theta, dtheta, omega) {
+    if (!(omega > 0) || !(dtheta > 0)) return theta;
+    const dt = dtheta / omega;
+    const n = Math.min(4000, Math.max(1, Math.ceil(dt / MAX_DT)));
+    const h = dt / n;
+    let th = theta;
+    for (let i = 0; i < n; i++) {
+      th += omega * h;
+      const m = motion(p, th);
+      const yc = m.y, vc = m.dy * omega, ac = m.ddy * omega * omega;
+      if (st.contact) {
+        const N = p.mass * ac + p.preload + p.k * yc + p.mass * G;
+        if (N >= 0) { st.y = yc; st.v = vc; st.N = N; continue; }
+        st.contact = false;
+      }
+      // Free flight on the spring. Position is advanced with the same second-order
+      // rule the cam's own motion obeys, so the gap opens smoothly at release.
+      const a = -(p.preload + p.k * st.y + p.mass * G) / p.mass;
+      st.y += st.v * h + 0.5 * a * h * h;
+      st.v += a * h;
+      st.N = 0;
+      // Lands when it reaches the surface while moving toward it, or if it has been
+      // pushed a visible amount into it. (The velocity test stops rounding noise from
+      // causing a false landing at the instant of release.)
+      if (st.y <= yc && (st.v <= vc || st.y < yc - 5e-7)) {
+        st.impact = Math.max(0, st.v < vc ? vc - st.v : 0);
+        st.y = yc; st.v = vc; st.contact = true;
+        st.N = p.mass * ac + p.preload + p.k * yc + p.mass * G;
+      }
+    }
+    st.floating = !st.contact;
+    return th;
+  }
+
+  const api = { TAU, G, DWELL_TOP, LAWS: Object.keys(LAWS), COEF, motion, phaseAt, bottomDwell, pressureAngle, contactForce, analyse, surface, outline, createFollower, advance, wrap };
+  OM.cam = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ---- lib/engine.js ---- */
 /* Four-stroke spark-ignition engine model (one cylinder).
  *
@@ -1342,6 +1558,213 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
 
   const api = { GEO, GAMMA, TIMINGS, STEP, N, pistonY, volume, cycle, at, powerKw, mod, inWin };
   OM.engine = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- lib/escapement.js ---- */
+/* Pendulum and deadbeat escapement.
+ *
+ * Two things live here.
+ *
+ * 1. The pendulum, with no small-angle shortcut: the exact period at any
+ *    amplitude (through the arithmetic-geometric mean), and a simulation with
+ *    air drag and the small push from the escapement once per swing.
+ *
+ * 2. The escapement geometry. A deadbeat (Graham) escapement has a 30-tooth wheel
+ *    and two pallets that span 7.5 teeth. Each pallet has a locking face that is
+ *    an arc around the anchor pivot (so the locked wheel pushes straight at the
+ *    pivot and gives no push and no recoil) followed by an impulse face. The
+ *    impulse face is found from the contact itself: it is the path of the tooth tip
+ *    as seen from the anchor, so the drawing and the motion cannot disagree.
+ *
+ * Angles: radians, counter-clockwise positive, y up. The wheel turns clockwise.
+ * The anchor angle theta is positive when the pendulum is to the right. */
+(function (root) {
+  'use strict';
+  const OM = root.OM || (root.OM = {});
+  const TAU = Math.PI * 2;
+  const DEG = Math.PI / 180;
+  const G_EARTH = 9.80665;
+
+  // ------------------------------------------------------------ pendulum
+  function agm(a, b) {
+    for (let i = 0; i < 40; i++) {
+      const an = (a + b) / 2, bn = Math.sqrt(a * b);
+      a = an; b = bn;
+      if (Math.abs(a - b) < 1e-15) break;
+    }
+    return a;
+  }
+  const period0 = (L, g) => TAU * Math.sqrt(L / g);
+  // T(A) / T0 for any amplitude A (radians, < pi): 1 / AGM(1, cos(A/2)).
+  const periodRatio = (amp) => 1 / agm(1, Math.cos(Math.min(amp, Math.PI - 1e-9) / 2));
+  const period = (L, g, amp) => period0(L, g) * periodRatio(amp);
+  const lengthForPeriod = (T, g) => g * (T / TAU) * (T / TAU);
+  // Seconds lost per day by a clock regulated for a tiny swing but running at amplitude amp.
+  const secondsLostPerDay = (amp) => 86400 * (1 - 1 / periodRatio(amp));
+
+  // -------------------------------------------------------- escapement
+  const TEETH = 30;
+  const PITCH = TAU / TEETH;
+  const HALF = PITCH / 2; // the wheel advances half a pitch per beat
+  const DEFAULTS = { thetaI: 1.5 * DEG, drop: 1.5 * DEG, q: 60 };
+  const LOCK_A = 135 * DEG; // tooth tip held by the entry pallet (left)
+  const LOCK_B = 45 * DEG; // tooth tip held by the exit pallet (right)
+  const W = { x: 0, y: 0 };
+  const PIV = { x: 0, y: Math.SQRT2 }; // where the two tangents to the wheel meet
+
+  const tipAt = (a) => ({ x: Math.cos(a), y: Math.sin(a) });
+  const rotAbout = (pt, c, th) => {
+    const dx = pt.x - c.x, dy = pt.y - c.y, cs = Math.cos(th), sn = Math.sin(th);
+    return { x: c.x + dx * cs - dy * sn, y: c.y + dx * sn + dy * cs };
+  };
+  // A point fixed on the anchor, at anchor angle theta, in world coordinates.
+  const anchorToWorld = (q, th) => rotAbout(q, PIV, th);
+
+  // Where the driven tooth tip is, as a function of the progress u (0..1) through its impulse.
+  function tipDuringImpulse(pallet, u, p) {
+    const a0 = pallet === 'left' ? LOCK_A : LOCK_B;
+    return tipAt(a0 - u * (HALF - p.drop));
+  }
+
+  // Pallet face as a list of points fixed on the anchor, from deep in the lock arc
+  // through the end of the impulse. thMax is the largest swing the lock must cover.
+  function face(pallet, p, thMax, n) {
+    p = Object.assign({}, DEFAULTS, p);
+    n = n || 24;
+    const sgn = pallet === 'left' ? 1 : -1; // the left pallet is locked for theta > +thetaI
+    const lock = pallet === 'left' ? tipAt(LOCK_A) : tipAt(LOCK_B);
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const th = sgn * (thMax - (thMax - p.thetaI) * (i / n));
+      pts.push({ th, q: rotAbout(lock, PIV, -th), kind: 'lock' });
+    }
+    for (let i = 1; i <= n; i++) {
+      const u = i / n;
+      const th = sgn * (p.thetaI - 2 * p.thetaI * u);
+      const tip = tipDuringImpulse(pallet, u, p);
+      pts.push({ th, q: rotAbout(tip, PIV, -th), kind: 'impulse', u });
+    }
+    // unit normal into the pallet body: the tooth moves into it, so it points along the wheel's clockwise motion
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(0, i - 1)].q, b = pts[Math.min(pts.length - 1, i + 1)].q;
+      let tx = b.x - a.x, ty = b.y - a.y;
+      const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
+      let nx = -ty, ny = tx;
+      // the world direction the tooth is moving (clockwise) in the anchor frame at this theta
+      const tipW = anchorToWorld(pts[i].q, pts[i].th);
+      const ang = Math.atan2(tipW.y, tipW.x);
+      const mv = rotAbout({ x: PIV.x + Math.sin(ang), y: PIV.y - Math.cos(ang) }, PIV, -pts[i].th);
+      const mvx = mv.x - PIV.x, mvy = mv.y - PIV.y;
+      if (nx * mvx + ny * mvy < 0) { nx = -nx; ny = -ny; }
+      pts[i].n = { x: nx, y: ny };
+    }
+    return pts;
+  }
+
+  // ----------------------------------------------------- the running clock
+  function create(L, g, p) {
+    p = Object.assign({}, DEFAULTS, p);
+    return {
+      L, g, p,
+      th: 0, w: 0, t: 0,
+      side: 1, // +1: the wheel is held by the left pallet; -1: by the right
+      beats: 0, u: 0, lag: 0,
+      accIn: 0, accOut: 0, lastIn: 0, lastOut: 0,
+      tick: 0, // seconds since the last beat
+      ampPeak: 0, amp: 0,
+    };
+  }
+
+  // Energy and drag are per unit m L^2, so the mass drops out of the motion.
+  function accel(st, th, w, drive) {
+    const w0 = Math.sqrt(st.g / st.L);
+    let a = -(w0 * w0) * Math.sin(th) - (w0 / st.p.q) * w;
+    if (Math.abs(th) < st.p.thetaI) a += -st.side * drive * w0 * w0;
+    return a;
+  }
+
+  // Advance by dt (s) with drive d (push acceleration as a fraction of g / L).
+  function step(st, dt, d) {
+    const n = Math.max(1, Math.ceil(dt / 0.0005));
+    const h = dt / n;
+    const w0 = Math.sqrt(st.g / st.L);
+    for (let i = 0; i < n; i++) {
+      const th = st.th, w = st.w;
+      const k1a = w, k1b = accel(st, th, w, d);
+      const k2a = w + 0.5 * h * k1b, k2b = accel(st, th + 0.5 * h * k1a, k2a, d);
+      const k3a = w + 0.5 * h * k2b, k3b = accel(st, th + 0.5 * h * k2a, k3a, d);
+      const k4a = w + h * k3b, k4b = accel(st, th + h * k3a, k4a, d);
+      st.th = th + (h / 6) * (k1a + 2 * k2a + 2 * k3a + k4a);
+      st.w = w + (h / 6) * (k1b + 2 * k2b + 2 * k3b + k4b);
+      st.t += h;
+      st.tick += h;
+      // work done by the drive and lost to drag, per unit m L^2
+      if (Math.abs(st.th) < st.p.thetaI) st.accIn += -st.side * d * w0 * w0 * st.w * h;
+      st.accOut += (w0 / st.p.q) * st.w * st.w * h;
+      // the wheel: release, impulse, then the next tooth drops onto the other pallet
+      if (st.side === 1 && st.th <= -st.p.thetaI) { st.side = -1; st.beats++; st.lag = st.p.drop; st.tick = 0; }
+      else if (st.side === -1 && st.th >= st.p.thetaI) { st.side = 1; st.beats++; st.lag = st.p.drop; st.tick = 0; }
+      st.u = st.side === 1
+        ? Math.min(1, Math.max(0, (st.p.thetaI - st.th) / (2 * st.p.thetaI)))
+        : Math.min(1, Math.max(0, (st.th + st.p.thetaI) / (2 * st.p.thetaI)));
+      st.lag *= Math.exp(-h / 0.012);
+      // swing turning point: record the amplitude and the energy books for that half swing
+      if (w * st.w < 0 || (w === 0 && st.w !== 0)) {
+        st.amp = Math.abs(st.th);
+        st.lastIn = st.accIn; st.lastOut = st.accOut;
+        st.accIn = 0; st.accOut = 0;
+      }
+    }
+  }
+
+  // Rotation of the escape wheel, clockwise, in radians.
+  function wheelAngle(st) {
+    return st.beats * HALF + st.u * (HALF - st.p.drop) - st.lag;
+  }
+
+  // Amplitude the drive would hold in the small-angle limit (radians).
+  function steadyAmplitude(d, p) {
+    p = Object.assign({}, DEFAULTS, p);
+    return 2 * Math.sqrt((d * p.thetaI * p.q) / Math.PI);
+  }
+  // The drive that would hold a given small-angle amplitude.
+  function driveFor(amp, p) {
+    p = Object.assign({}, DEFAULTS, p);
+    return (amp * amp * Math.PI) / (4 * p.thetaI * p.q);
+  }
+
+  // ------------------------------------------------------------ outlines
+  // Shapes shared by the drawing and the clearance test. All in world units (wheel radius 1).
+  const TOOTH = { root: 0.8, inner: 0.66, lead: -0.1, trail: 0.3 }; // angles in fractions of a pitch
+  const STONE_T = 0.04; // pallet stone thickness
+  const THMAX = 7 * DEG; // the largest swing the locking faces are cut for
+  // Tooth i of the wheel, which has turned by phi, as a closed polygon.
+  function toothPolygon(i, phi) {
+    const a = LOCK_A + i * PITCH - phi;
+    const pt = (r, da) => ({ x: r * Math.cos(a + da * PITCH), y: r * Math.sin(a + da * PITCH) });
+    return [pt(TOOTH.inner, -TOOTH.lead), pt(TOOTH.root, -TOOTH.lead), pt(1, 0), pt(TOOTH.root, TOOTH.trail), pt(TOOTH.inner, TOOTH.trail)];
+  }
+  // A pallet stone, fixed on the anchor: the working face (locking arc, then impulse face)
+  // and a straight back of the given thickness.
+  function stonePolygon(pallet, thickness, p, thMax) {
+    thickness = thickness == null ? STONE_T : thickness;
+    const f = face(pallet, p, thMax == null ? THMAX : thMax, 28);
+    const nb = f[1].n;
+    const pts = f.map((q) => ({ x: q.q.x, y: q.q.y }));
+    const last = f[f.length - 1].q, first = f[0].q;
+    pts.push({ x: last.x + nb.x * thickness, y: last.y + nb.y * thickness });
+    pts.push({ x: first.x + nb.x * thickness, y: first.y + nb.y * thickness });
+    return pts;
+  }
+
+  const api = {
+    TAU, DEG, G_EARTH, TEETH, PITCH, HALF, DEFAULTS, LOCK_A, LOCK_B, W, PIV, TOOTH, STONE_T, THMAX,
+    agm, period0, periodRatio, period, lengthForPeriod, secondsLostPerDay,
+    tipAt, rotAbout, anchorToWorld, tipDuringImpulse, face, toothPolygon, stonePolygon,
+    create, step, wheelAngle, steadyAmplitude, driveFor,
+  };
+  OM.escapement = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
@@ -2037,6 +2460,156 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
 
   const api = { A_CORE, B_SAT, analyse, dcStep };
   OM.transformer = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- lib/water.js ---- */
+/* The water cycle as a parcel of air crossing a mountain.
+ *
+ * Damp air leaves the sea, is forced up a slope, cools, condenses into cloud,
+ * drops rain, and sinks down the far side warmer and drier. Every number comes
+ * from textbook thermodynamics:
+ *
+ *   evaporation     bulk formula  E = rho C_E U (q_s - q_a)
+ *   vapour pressure Magnus form (Alduchov and Eskridge 1996)
+ *   cloud base      Bolton's lifting condensation level
+ *   cooling         9.8 K/km while unsaturated, then the moist adiabat
+ *   far side        dry adiabatic warming; most of the condensate has rained out,
+ *                   the rest evaporates again and cools the sinking air
+ *
+ * Units: degrees C, hPa, metres, kg/kg for humidity, mm/day for water depth. */
+(function (root) {
+  'use strict';
+  const OM = root.OM || (root.OM = {});
+  const RD = 287.05; // gas constant of dry air, J/(kg K)
+  const CP = 1004; // J/(kg K)
+  const G = 9.80665;
+  const EPS = 0.622;
+  const GAMMA_D = G / CP; // K/m, dry adiabatic lapse rate
+  const C_E = 1.2e-3; // bulk transfer coefficient for moisture (Dalton number), neutral air
+  const SALT = 0.98; // sea salt lowers the saturation vapour pressure by about 2 percent
+  const LIFT_DEPTH = 400; // m, depth of the air layer the slope forces upward
+  const PRECIP_EFF = 0.6; // share of the condensed water that reaches the ground as rain
+  const SLOPE_KM = 40; // km, horizontal length of the windward slope
+  const RHO_AIR = 1.15; // kg/m3 near the surface
+
+  const K = (c) => c + 273.15;
+  // Latent heat of vaporisation (J/kg), falling slowly with temperature.
+  const latentHeat = (c) => 2.501e6 - 2370 * c;
+
+  // Saturation vapour pressure over water (hPa).
+  function esat(c) { return 6.1094 * Math.exp((17.625 * c) / (c + 243.04)); }
+  // Dew point (C) for temperature c and relative humidity rh (0..1).
+  function dewpoint(c, rh) {
+    const g = Math.log(Math.max(rh, 1e-4)) + (17.625 * c) / (243.04 + c);
+    return (243.04 * g) / (17.625 - g);
+  }
+  // Pressure at height z (hPa), International Standard Atmosphere.
+  function pressureAt(z) { return 1013.25 * Math.pow(1 - 2.25577e-5 * z, 5.25588); }
+  // Saturation mixing ratio (kg/kg) at temperature c and pressure p.
+  function qsat(c, p) { const e = esat(c); return (EPS * e) / (p - e); }
+  // Vapour mixing ratio of air at c with relative humidity rh.
+  function qOf(c, rh, p) { const e = rh * esat(c); return (EPS * e) / (p - e); }
+  // Relative humidity (0..1) of air with mixing ratio q at temperature c, pressure p.
+  function rhOf(q, c, p) { const e = (q * p) / (EPS + q); return Math.min(1.5, e / esat(c)); }
+
+  // Height (m) at which air lifted from the surface becomes saturated (Bolton 1980).
+  function lclHeight(c, rh) {
+    if (rh >= 0.9999) return 0;
+    const t = K(c), td = K(dewpoint(c, rh));
+    const tl = 1 / (1 / (td - 56) + Math.log(t / td) / 800) + 56;
+    return Math.max(0, (t - tl) / GAMMA_D);
+  }
+  // Espy's rule of thumb, for comparison: 125 m per degree of dew-point depression.
+  function lclEspy(c, rh) { return 125 * Math.max(0, c - dewpoint(c, rh)); }
+
+  // Saturated (moist) adiabatic lapse rate, K/m.
+  function moistLapse(c, p) {
+    const t = K(c), lv = latentHeat(c);
+    const rs = qsat(c, p);
+    return (G * (1 + (lv * rs) / (RD * t))) / (CP + (lv * lv * rs * EPS) / (RD * t * t));
+  }
+
+  // Follow a surface parcel up to height zTop. Below the cloud base it cools dry
+  // adiabatically, above it along the moist adiabat with the condensate removed.
+  // Returns the path and what it gained or lost.
+  function ascend(seaC, rh, zTop) {
+    const tAir = seaC - 1; // the air just above the sea is a little cooler than the water
+    const p0 = 1013.25;
+    const q0 = qOf(tAir, rh, p0);
+    const zl = lclHeight(tAir, rh);
+    const path = [{ z: 0, T: tAir, q: q0, cloud: false }];
+    const step = 25;
+    let z = 0, T = tAir;
+    let q = q0;
+    while (z < zTop - 1e-9) {
+      const dz = Math.min(step, zTop - z);
+      const zm = z + dz / 2;
+      if (z >= zl) {
+        // saturated: integrate with a midpoint step
+        const p1 = pressureAt(zm);
+        const tm = T - 0.5 * dz * moistLapse(T, pressureAt(z));
+        T -= dz * moistLapse(tm, p1);
+      } else if (z + dz > zl) {
+        // the step contains the cloud base
+        T -= GAMMA_D * (zl - z);
+        const rest = z + dz - zl;
+        const p1 = pressureAt(zl + rest / 2);
+        T -= rest * moistLapse(T, p1);
+      } else {
+        T -= GAMMA_D * dz;
+      }
+      z += dz;
+      const sat = z > zl;
+      q = sat ? Math.min(q0, qsat(T, pressureAt(z))) : q0;
+      path.push({ z, T, q, cloud: sat });
+    }
+    const top = path[path.length - 1];
+    const cloud = zTop > zl + 1e-9;
+    return {
+      z: zTop, zLcl: zl, tAir, q0, rh, path,
+      cloud,
+      Ttop: top.T, qtop: top.q,
+      condensed: Math.max(0, q0 - top.q), // kg of water per kg of air
+    };
+  }
+
+  // The far side. Part of the condensate has fallen as rain; the rest evaporates again
+  // in the sinking air, which warms dry adiabatically and cools a little as it does.
+  function descend(asc) {
+    const left = (1 - PRECIP_EFF) * asc.condensed;
+    const q = asc.qtop + left;
+    const T = asc.Ttop + GAMMA_D * asc.z - (latentHeat(asc.Ttop) * left) / CP;
+    const p = 1013.25;
+    const rh = Math.min(1, rhOf(q, T, p));
+    return { T, q, rh, dew: dewpoint(T, rh) };
+  }
+
+  // Evaporation from the sea by the bulk aerodynamic formula.
+  function evaporation(seaC, rh, wind) {
+    const tAir = seaC - 1;
+    const p = 1013.25;
+    const qs = SALT * qsat(seaC, p);
+    const qa = qOf(tAir, rh, p);
+    const rho = (p * 100) / (RD * K(tAir));
+    const flux = Math.max(0, rho * C_E * wind * (qs - qa)); // kg/(m2 s)
+    return { kgPerM2S: flux, mmDay: flux * 86400, watts: flux * latentHeat(seaC), qs, qa };
+  }
+
+  // Rain on the windward slope (mm/day). The slope forces a layer of air upward and part of
+  // the vapour that condenses on the way to the crest falls out over the slope.
+  function rain(seaC, rh, wind, ridge) {
+    const asc = ascend(seaC, rh, ridge);
+    const flux = RHO_AIR * wind * LIFT_DEPTH * asc.condensed * PRECIP_EFF; // kg/s per metre of coast
+    const mmDay = ((flux / (SLOPE_KM * 1000)) * 86400);
+    return { mmDay, asc, lee: descend(asc) };
+  }
+
+  const api = {
+    GAMMA_D, C_E, LIFT_DEPTH, SLOPE_KM, PRECIP_EFF, latentHeat, esat, dewpoint, pressureAt, qsat, qOf, rhOf,
+    lclHeight, lclEspy, moistLapse, ascend, descend, evaporation, rain,
+  };
+  OM.water = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
@@ -5781,6 +6354,1121 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
   });
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ---- modules/14-cam.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Cm = OM.cam;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, hatchRect, alpha, spring, plotFrame } = OM.gfx;
+
+  const K = 3; // drawing pixels per millimetre
+  const DEG = Math.PI / 180;
+  const DISP = (2 * Math.PI) / 3; // the picture turns once every 3 seconds, whatever the real speed
+  const RR = 8; // roller radius, mm
+  const MASS = 0.05; // follower, kg
+  const PRELOAD = 100; // spring force with the follower at the bottom, N
+  const LIFT_AXIS = 16; // mm, top of the lift chart
+
+  OM.register({
+    id: 'cam',
+    title: 'Cam and follower',
+    group: 'machines',
+    hook: 'A cam is a motion program cut into metal. Spin it and a follower plays the program back, until it goes too fast to keep up.',
+    units: 'mm, degrees, N, rpm',
+    alt: 'A rotating cam with a spring-loaded roller follower above it, and three charts against cam angle: follower lift, acceleration, and the force between cam and follower, with the region where the follower would leave the cam shaded.',
+    controls: [
+      { id: 'rpm', type: 'range', label: 'Cam speed', min: 100, max: 4000, step: 50, value: 600, unit: 'rpm' },
+      { id: 'lift', type: 'range', label: 'Lift', min: 4, max: 16, step: 1, value: 10, unit: 'mm' },
+      { id: 'law', type: 'seg', label: 'Motion law', value: 'cycloidal', options: [{ v: 'cycloidal', l: 'Cycloidal' }, { v: 'harmonic', l: 'Harmonic' }, { v: 'parabolic', l: 'Constant accel.' }] },
+      { id: 'rise', type: 'range', label: 'Rise (and fall) angle', min: 30, max: 120, step: 5, value: 70, unit: '°' },
+      { id: 'rb', type: 'range', label: 'Base circle radius', min: 10, max: 35, step: 1, value: 25, unit: 'mm' },
+      { id: 'k', type: 'range', label: 'Spring stiffness', min: 2, max: 30, step: 1, value: 10, unit: 'N/mm' },
+    ],
+    content: {
+      intro: 'A cam is a disc whose edge is deliberately not round. A follower rides on the edge, so the shape of the edge becomes the motion of the follower. The cam can only push. A spring has to bring the follower back, and that is where the trouble starts when things get fast.',
+      steps: [
+        { h: 'On the base circle', p: 'Where the edge is a plain circle around the shaft, the follower sits still. This rest is called a dwell, and it is built into the shape on purpose.' },
+        { h: 'The lobe lifts', p: 'As the lobe comes round, the follower is pushed out. The motion law decides how gently: the lift is the same, but the speed and acceleration along the way are not.' },
+        { h: 'Held at the top', p: 'A short flat stretch at the largest radius keeps the follower at full lift. In an engine this is where the valve stays open.' },
+        { h: 'The spring brings it back', p: 'The cam cannot pull. The spring pushes the follower down as the lobe leaves, and it has to push hard enough to keep the roller against the edge the whole way.' },
+      ],
+      principle: {
+        lead: 'Every point on the cam edge is a position, and the speed of the shaft turns that position list into a schedule. Faster shaft, bigger forces: the acceleration grows with the square of the speed.',
+        eqs: [
+          { label: 'Cycloidal rise', eq: 'y = h ( s − sin 2πs / 2π ), s = θ / β', note: 'h is the lift and β the angle of the rise. The harmonic law is y = h (1 − cos πs) / 2.' },
+          { label: 'Peak acceleration', eq: 'a~max~ = C h ω^2^ / β^2^', note: 'C is 4.0 for constant acceleration, 4.93 for harmonic and 6.28 for cycloidal. Double the speed and the acceleration is four times bigger.' },
+          { label: 'Force between cam and follower', eq: 'N = m a + F~0~ + k y + m g', note: 'The spring supplies F₀ + k y. If that falls below what is needed to decelerate the follower, N would have to be negative.' },
+          { label: 'Pressure angle', eq: 'tan φ = (dy/dθ) / (R~b~ + R~r~ + y)', note: 'The angle between the push and the direction the follower can move. Above about 30° the guide takes a big sideways load.' },
+        ],
+        points: [
+          'The cam can push but not pull, so N can never be negative. When the equation says it must be, the follower leaves the cam. This is **valve float**, and the simulation shows the follower flying off and landing again.',
+          'A small base circle with a tall, quick lobe gives a steep edge: a high pressure angle and, in the extreme, a cam that cannot be cut because the roller is wider than the tip of the lobe (undercut).',
+          '**What this model leaves out:** the springiness of the follower and its rod (real ones vibrate), friction, oil films and the mass of the roller. The follower is 50 g, the spring is preloaded to 100 N and the roller is 8 mm in radius. The picture turns once every 3 seconds; the force and acceleration figures use the real speed.',
+        ],
+      },
+      myth: {
+        claim: 'The cam controls the follower completely, both up and down.',
+        truth: 'A cam only pushes. The way back is the spring, and once the cam is fast enough the spring cannot keep up and the follower leaves the surface. Ducati\'s desmodromic engines avoid this by using a second cam to close the valve by force, with no valve spring.',
+      },
+      tries: [
+        { label: 'Slow and safe', text: 'Gentle speed: the force stays positive and the follower hugs the edge.', set: { rpm: 300, lift: 10, law: 'cycloidal', rise: 70, rb: 25, k: 10 } },
+        { label: 'Too fast', text: 'Above the float speed the follower leaves the cam near the top of the lobe, overshoots, and lands late.', set: { rpm: 3600, lift: 10, law: 'cycloidal', rise: 70, rb: 25, k: 10 } },
+        { label: 'Stiffer spring', text: 'The same speed with a stiffer spring keeps the follower down.', set: { rpm: 3600, lift: 10, law: 'cycloidal', rise: 70, rb: 25, k: 30 } },
+        { label: 'Smooth or gentle?', text: 'At 3,100 rpm the cycloidal cam floats, but this one does not: it has the lowest peak acceleration. Switch the law back to compare.', set: { rpm: 3100, law: 'parabolic', lift: 10, rise: 70, rb: 25, k: 10 } },
+        { label: 'Small and steep', text: 'A small base circle with a quick rise: a huge pressure angle, and the cam is undercut.', set: { rpm: 600, lift: 14, rise: 40, rb: 12, law: 'cycloidal', k: 10 } },
+      ],
+      quiz: [
+        { q: 'What brings the follower back down after the lobe passes?', opts: ['The cam pulls it back', 'The spring', 'The shaft', 'The roller'], a: 1, why: 'A cam can only push. The spring supplies the return force, and it has to be strong enough to keep the follower touching the cam.' },
+        { q: 'You double the cam speed, from 1,000 to 2,000 rpm. The force needed to accelerate the follower becomes…', opts: ['2 times bigger', '4 times bigger', '8 times bigger', 'the same'], a: 1, why: 'Acceleration is proportional to the speed squared, so twice the speed means four times the acceleration and four times the force.' },
+        { q: 'The cycloidal law has a higher peak acceleration than the harmonic law. Why is it used for fast cams?', opts: ['It is cheaper to cut', 'Its acceleration starts and ends at zero, so the force changes gently and there is less knocking and wear', 'It lifts the follower higher', 'It needs no spring'], a: 1, why: 'Smooth changes of force avoid jolts (high jerk) that set the follower vibrating and hammer the cam. The price is a higher peak force.' },
+      ],
+      sources: [
+        'R. L. Norton, *Design of Machinery*, McGraw-Hill (cam design, motion laws, pressure angle, follower dynamics).',
+        'J. E. Shigley and J. J. Uicker, *Theory of Machines and Mechanisms*, Oxford University Press (cam profile geometry).',
+      ],
+    },
+
+    create(host) {
+      const st = { th: 0, fol: null, bins: new Float32Array(360), last: 0 };
+      let G = null;
+      let L = null;
+
+      const omega = () => (host.ctl.rpm * Math.PI) / 30;
+      const params = () => {
+        const c = host.ctl;
+        return { lift: c.lift / 1000, rise: c.rise * DEG, law: c.law, rb: c.rb / 1000, rr: RR / 1000, mass: MASS, k: c.k * 1000, preload: PRELOAD };
+      };
+      // Everything that depends only on the shape of the cam.
+      function geom() {
+        const c = host.ctl;
+        const key = [c.lift, c.rise, c.law, c.rb, c.k].join('|');
+        if (!G || G.key !== key) {
+          const p = params();
+          const y = new Float32Array(361), dd = new Float32Array(361);
+          for (let i = 0; i <= 360; i++) { const m = Cm.motion(p, i * DEG); y[i] = m.y * 1000; dd[i] = m.ddy; }
+          G = { key, p, an: Cm.analyse(p), out: Cm.outline(p, 540), y, dd };
+        }
+        return G;
+      }
+
+      function advanceBy(dth) {
+        const g = geom();
+        st.th = Cm.advance(st.fol, g.p, st.th, dth, omega());
+        const b = Math.floor((Cm.wrap(st.th) * 180) / Math.PI) % 360;
+        let k = st.last;
+        let guard = 0;
+        while (k !== b && guard++ < 360) { k = (k + 1) % 360; st.bins[k] = st.fol.y * 1000; }
+        st.last = b;
+      }
+      function restart() {
+        const g = geom();
+        st.th = 2 * Math.PI - 0.35;
+        st.fol = Cm.createFollower(g.p, st.th, omega());
+        st.bins.fill(-1);
+        st.last = Math.floor((Cm.wrap(st.th) * 180) / Math.PI) % 360;
+        for (let i = 0; i < 3 * 126; i++) advanceBy(0.05);
+      }
+
+      const floating = () => !st.fol.contact;
+      const live = () => {
+        const g = geom();
+        const w = omega();
+        const m = Cm.motion(g.p, st.th);
+        const phi = Cm.pressureAngle(g.p, st.th);
+        const N = st.fol.contact ? st.fol.N : 0;
+        return { m, phi, N, side: N * Math.tan(phi), phase: Cm.phaseAt(g.p, st.th), w };
+      };
+
+      const sim = {
+        ref: { w: 780, h: 500 },
+        refNarrow: { w: 420, h: 920 },
+        state: st,
+        init() { restart(); },
+        layout(V) {
+          L = V.narrow
+            ? { scene: { x: 10, y: 0 }, ch: [{ x: 14, y: 500, w: 392, h: 140 }, { x: 14, y: 640, w: 392, h: 140 }, { x: 14, y: 780, w: 392, h: 140 }] }
+            : { scene: { x: 0, y: 0 }, ch: [{ x: 420, y: 6, w: 350, h: 160 }, { x: 420, y: 168, w: 350, h: 160 }, { x: 420, y: 330, w: 350, h: 160 }] };
+        },
+        step(dt) { advanceBy(DISP * dt); },
+        thumb() { const g = geom(); st.th = g.p.rise * 0.62; st.fol = Cm.createFollower(g.p, st.th, omega()); },
+        onControl() { const g = geom(); st.fol = Cm.createFollower(g.p, st.th, omega()); st.bins.fill(-1); },
+        phase() { return live().phase; },
+        readouts() {
+          const g = geom();
+          const l = live();
+          const a = g.an.amax * l.w * l.w;
+          const pa = l.phi / DEG, pm = g.an.phimax / DEG;
+          const over = host.ctl.rpm > g.an.floatRpm;
+          return [
+            { k: 'Follower lift', v: fmt(st.fol.y * 1000, 1) + ' mm' },
+            { k: 'Pressure angle', v: fmt(pa, 0) + '° (max ' + fmt(pm, 0) + '°)', tone: pm > 45 ? 'bad' : pm > 30 ? 'warn' : '' },
+            { k: 'Peak acceleration', v: fmt(a / Cm.G, 0) + ' g' },
+            { k: 'Cam pushes with', v: floating() ? '0 N (floating)' : fmt(l.N, 0) + ' N', tone: floating() ? 'bad' : '' },
+            { k: 'Sideways load', v: fmt(l.side, 0) + ' N' },
+            { k: 'Follower floats above', v: fmt(g.an.floatRpm, 0) + ' rpm', tone: over ? 'bad' : '' },
+            { k: 'Picture slowed by', v: fmt(l.w / DISP, 0) + ' ×' },
+          ];
+        },
+        caption() {
+          const g = geom();
+          if (g.out.undercut) return 'Undercut: this cam cannot be cut';
+          if (floating()) return 'Follower has left the cam';
+          return ['Resting on the base circle', 'Lifting', 'Held at the top', 'Falling'][live().phase];
+        },
+        describe() {
+          const g = geom();
+          const l = live();
+          return 'Cam at ' + fmt(host.ctl.rpm, 0) + ' rpm, follower lift ' + fmt(st.fol.y * 1000, 1) + ' millimetres. ' + (host.ctl.rpm > g.an.floatRpm ? 'Above ' + fmt(g.an.floatRpm, 0) + ' rpm the follower leaves the cam.' : 'The follower stays in contact.');
+        },
+
+        draw(g, V, c) {
+          drawScene(g, V, c);
+          if (V.thumb) return;
+          drawCharts(g, V, c);
+        },
+      };
+
+      // ------------------------------------------------------------ scene
+      function drawScene(g, V, c) {
+        const { p, out } = geom();
+        const lw = (n) => V.px(n);
+        const ink = c.ink;
+        g.save();
+        g.translate(L.scene.x, L.scene.y);
+        const cx = 200, cy = 330;
+        const th = st.th;
+        const rr = RR * K;
+        const yF = st.fol.y;
+        const rollerY = cy - (p.rb + p.rr + yF) * 1000 * K;
+        const flangeY = rollerY - rr - 26;
+        const plateY = 54;
+        const Rmax = (p.rb + p.lift) * 1000 * K;
+
+        // fixed plate
+        g.fillStyle = c.paper2; g.fillRect(120, plateY, 160, 14);
+        hatchRect(g, V, 120, plateY, 160, 14, { gap: 8, color: c.line });
+        g.strokeStyle = ink; g.lineWidth = lw(1.5); g.strokeRect(120, plateY, 160, 14);
+        text(g, V, 'fixed frame', 286, plateY + 11, { px: 10.5, color: c.ink2, halo: false });
+
+        // return spring
+        spring(g, V, cx, plateY + 14, cx, flangeY, 9, 12, c.ink2, 1.6);
+        text(g, V, 'spring', cx - 22, (plateY + 14 + flangeY) / 2 + 4, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+
+        // stem, cap and flange
+        g.fillStyle = c.metal; g.strokeStyle = ink; g.lineWidth = lw(1.5);
+        g.fillRect(cx - 5, 30, 10, flangeY - 30); g.strokeRect(cx - 5, 30, 10, flangeY - 30);
+        g.fillRect(cx - 12, 24, 24, 7); g.strokeRect(cx - 12, 24, 24, 7);
+        g.fillRect(cx - 30, flangeY, 60, 8); g.strokeRect(cx - 30, flangeY, 60, 8);
+
+        // cam
+        g.save();
+        g.translate(cx, cy);
+        g.rotate(th);
+        g.beginPath();
+        for (let i = 0; i < out.cam.length; i++) { const q = out.cam[i]; const X = q.x * 1000 * K, Y = q.y * 1000 * K; if (i) g.lineTo(X, Y); else g.moveTo(X, Y); }
+        g.closePath();
+        g.fillStyle = c.metal2; g.fill();
+        g.strokeStyle = ink; g.lineWidth = lw(2); g.lineJoin = 'round'; g.stroke();
+        // the path the roller centre follows
+        g.setLineDash([V.px(4), V.px(3)]);
+        g.strokeStyle = alpha(c.cold, 0.9); g.lineWidth = lw(1.3);
+        g.beginPath();
+        for (let i = 0; i < out.pitch.length; i++) { const q = out.pitch[i]; const X = q.x * 1000 * K, Y = q.y * 1000 * K; if (i) g.lineTo(X, Y); else g.moveTo(X, Y); }
+        g.closePath(); g.stroke();
+        // the base circle
+        g.strokeStyle = c.ink3; g.lineWidth = lw(1.2);
+        g.beginPath(); g.arc(0, 0, p.rb * 1000 * K, 0, Math.PI * 2); g.stroke();
+        g.setLineDash([]);
+        // shaft and a mark that shows which way it has turned
+        g.beginPath(); g.arc(0, 0, 8, 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.strokeStyle = ink; g.lineWidth = lw(1.8); g.stroke();
+        g.strokeStyle = c.accent; g.lineWidth = lw(3.5); g.lineCap = 'round';
+        g.beginPath(); g.moveTo(0, -12); g.lineTo(0, -(p.rb * 1000 * K) * 0.62); g.stroke();
+        g.lineCap = 'butt';
+        g.restore();
+
+        // fork and roller
+        g.fillStyle = c.metal; g.strokeStyle = ink; g.lineWidth = lw(1.5);
+        g.fillRect(cx - rr - 7, flangeY + 8, 5, rollerY - flangeY - 2); g.strokeRect(cx - rr - 7, flangeY + 8, 5, rollerY - flangeY - 2);
+        g.fillRect(cx + rr + 2, flangeY + 8, 5, rollerY - flangeY - 2); g.strokeRect(cx + rr + 2, flangeY + 8, 5, rollerY - flangeY - 2);
+        g.beginPath(); g.arc(cx, rollerY, rr, 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.lineWidth = lw(2); g.stroke();
+        g.beginPath(); g.arc(cx, rollerY, 3, 0, Math.PI * 2); g.fillStyle = ink; g.fill();
+
+        const fl = floating();
+        // contact normal and pressure angle
+        if (!fl) {
+          const s = Cm.surface(p, -th);
+          const cs = Math.cos(th), sn = Math.sin(th);
+          const px = cx + (s.cam.x * cs - s.cam.y * sn) * 1000 * K;
+          const py = cy + (s.cam.x * sn + s.cam.y * cs) * 1000 * K;
+          const dx = cx - px, dy = rollerY - py;
+          const dl = Math.hypot(dx, dy) || 1;
+          line(g, V, px, py, cx + (dx / dl) * 40, rollerY + (dy / dl) * 40, c.hot, 1.6);
+          line(g, V, cx, rollerY - rr - 2, cx, rollerY - 46, c.ink2, 1.2, [3, 3]);
+          const phi = Cm.pressureAngle(p, th);
+          const hiPhi = phi / DEG;
+          const tone = hiPhi > 45 ? c.bad : hiPhi > 30 ? c.warn : c.ink;
+          text(g, V, 'φ ' + fmt(hiPhi, 0) + '°', cx + rr + 16, rollerY - 4, { px: 11.5, mono: true, weight: 800, color: tone });
+        } else {
+          text(g, V, 'floating!', cx + rr + 16, rollerY - 4, { px: 12, weight: 800, color: c.bad });
+        }
+        text(g, V, 'follower', cx + 38, flangeY + 6, { px: 10.5, color: c.ink2, halo: false });
+
+        // the cam, turning clockwise
+        if (!V.thumb) {
+          text(g, V, 'cam', cx - Rmax * 0.72 - 12, cy + Rmax * 0.72 + 18, { px: 11, color: c.ink2, align: 'right', halo: false });
+          const ra = Rmax + 16;
+          g.strokeStyle = c.ink2; g.lineWidth = lw(1.4);
+          g.beginPath(); g.arc(cx, cy, ra, 25 * DEG, 65 * DEG); g.stroke();
+          const a1 = 65 * DEG;
+          arrow(g, V, cx + ra * Math.cos(a1 - 0.05), cy + ra * Math.sin(a1 - 0.05), cx + ra * Math.cos(a1 + 0.02), cy + ra * Math.sin(a1 + 0.02), c.ink2, 1.4, 8);
+          text(g, V, fmt(host.ctl.rpm, 0) + ' rpm (real)', cx + ra * Math.cos(45 * DEG) + 14, cy + ra * Math.sin(45 * DEG) + 6, { px: 10.5, color: c.ink2, halo: false });
+        }
+        g.restore();
+      }
+
+      // ----------------------------------------------------------- charts
+      function drawCharts(g, V, c) {
+        const { p, an, y, dd, out } = geom();
+        const w = omega();
+        const cur = (Cm.wrap(st.th) * 180) / Math.PI;
+        const rise = host.ctl.rise;
+        const zones = [
+          { a: 0, b: rise, name: 'rise', hot: true },
+          { a: rise, b: rise + 30, name: 'dwell' },
+          { a: rise + 30, b: 2 * rise + 30, name: 'fall', hot: true },
+          { a: 2 * rise + 30, b: 360, name: 'rest' },
+        ];
+        const frame = (r, title, yl, last) => plotFrame(g, V, c, r, title, last ? 'cam angle, degrees' : '', yl);
+        const X = (f, a) => f.x0 + (a / 360) * f.w;
+        const shade = (f, withNames) => {
+          zones.forEach((z) => {
+            if (z.hot) { g.fillStyle = alpha(c.accent, 0.16); g.fillRect(X(f, z.a), f.y0, X(f, z.b) - X(f, z.a), f.h); }
+          });
+          if (withNames) zones.forEach((z) => {
+            if (z.b - z.a >= 30) text(g, V, z.name, (X(f, z.a) + X(f, z.b)) / 2, f.y0 + 11, { px: 10, color: c.ink2, align: 'center', halo: false });
+          });
+        };
+        const marker = (f, yy, col) => {
+          line(g, V, X(f, cur), f.y0, X(f, cur), f.y0 + f.h, alpha(c.ink, 0.35), 1);
+          g.beginPath(); g.arc(X(f, cur), yy, V.px(5.5), 0, Math.PI * 2); g.fillStyle = col || c.accent; g.fill();
+          g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        };
+        const xticks = (f) => { for (const a of [0, 90, 180, 270, 360]) text(g, V, String(a), X(f, a), f.y0 + f.h + 14, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); };
+
+        // 1. lift
+        const f1 = frame(L.ch[0], 'Follower lift, mm', '', false);
+        shade(f1, true);
+        const Y1 = (v) => f1.y0 + f1.h - (v / LIFT_AXIS) * f1.h;
+        for (const v of [0, 8, 16]) { line(g, V, f1.x0 - 4, Y1(v), f1.x0, Y1(v), c.ink, 1); text(g, V, String(v), f1.x0 - 6, Y1(v) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.beginPath();
+        for (let i = 0; i <= 360; i++) { if (i) g.lineTo(X(f1, i), Y1(y[i])); else g.moveTo(X(f1, i), Y1(y[i])); }
+        g.stroke();
+        // where the follower actually was on the last pass
+        g.fillStyle = c.bad;
+        for (let i = 0; i < 360; i++) {
+          const v = st.bins[i];
+          if (v >= 0 && Math.abs(v - y[i]) > 0.06) { g.beginPath(); g.arc(X(f1, i + 0.5), Y1(v), V.px(2), 0, Math.PI * 2); g.fill(); }
+        }
+        marker(f1, Y1(st.fol.y * 1000), floating() ? c.bad : c.accent);
+
+        // 2. acceleration at the real speed
+        const f2 = frame(L.ch[1], 'Acceleration at this speed, m/s²', '', false);
+        shade(f2, false);
+        const peak = Math.max(an.amax * w * w, 1e-9);
+        const Y2 = (v) => f2.y0 + f2.h / 2 - (v / peak) * (f2.h / 2 - 3);
+        line(g, V, f2.x0, Y2(0), f2.x0 + f2.w, Y2(0), c.ink2, 1, [4, 3]);
+        for (const v of [peak, 0, -peak]) { line(g, V, f2.x0 - 4, Y2(v), f2.x0, Y2(v), c.ink, 1); text(g, V, fmt(v, 0), f2.x0 - 6, Y2(v) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        g.strokeStyle = c.cold; g.lineWidth = V.px(2); g.beginPath();
+        for (let i = 0; i <= 360; i++) { const v = dd[i] * w * w; if (i) g.lineTo(X(f2, i), Y2(v)); else g.moveTo(X(f2, i), Y2(v)); }
+        g.stroke();
+        marker(f2, Y2(Cm.motion(p, st.th).ddy * w * w), c.accent);
+
+        // 3. force between cam and follower
+        const f3 = frame(L.ch[2], 'Force the cam must supply, N', '', true);
+        shade(f3, false);
+        const force = new Float32Array(361);
+        let fmin = Infinity, fmax = -Infinity;
+        for (let i = 0; i <= 360; i++) { const v = p.mass * dd[i] * w * w + p.preload + p.k * (y[i] / 1000) + p.mass * Cm.G; force[i] = v; fmin = Math.min(fmin, v); fmax = Math.max(fmax, v); }
+        const lo = Math.min(0, fmin) * 1.08, hi = Math.max(fmax, 50) * 1.08;
+        const Y3 = (v) => f3.y0 + f3.h - ((v - lo) / (hi - lo)) * f3.h;
+        if (fmin < 0) {
+          g.fillStyle = alpha(c.bad, 0.22);
+          g.fillRect(f3.x0, Y3(0), f3.w, f3.y0 + f3.h - Y3(0));
+          text(g, V, 'cam would have to pull: follower floats', f3.x0 + f3.w - 4, f3.y0 + f3.h - 6, { px: 10.5, color: c.bad, weight: 700, align: 'right' });
+        }
+        line(g, V, f3.x0, Y3(0), f3.x0 + f3.w, Y3(0), c.ink, 1.3);
+        for (const v of [0, hi / 1.08]) { line(g, V, f3.x0 - 4, Y3(v), f3.x0, Y3(v), c.ink, 1); text(g, V, fmt(v, 0), f3.x0 - 6, Y3(v) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        g.strokeStyle = fmin < 0 ? c.bad : c.elec; g.lineWidth = V.px(2); g.beginPath();
+        for (let i = 0; i <= 360; i++) { if (i) g.lineTo(X(f3, i), Y3(force[i])); else g.moveTo(X(f3, i), Y3(force[i])); }
+        g.stroke();
+        const Nnow = floating() ? 0 : st.fol.N;
+        marker(f3, Y3(Nnow), floating() ? c.bad : c.accent);
+        xticks(f3);
+        if (out.undercut) text(g, V, 'undercut: the edge has cusps', f3.x0 + f3.w, f3.y0 - 6, { px: 10.5, color: c.bad, weight: 700, align: 'right', halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/15-escapement.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Es = OM.escapement;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, alpha, pairBars, plotFrame } = OM.gfx;
+
+  const DEG = Es.DEG;
+  const S = 100; // drawing pixels per wheel radius
+  const CX = 200, CY = 272; // centre of the escape wheel in the scene
+  const A_FULL = 6 * DEG; // swing held by 100 percent drive
+  const D_FULL = Es.driveFor(A_FULL);
+  const WINDOW = 8; // seconds shown in the swing chart
+  const GRAV = { earth: 9.80665, mars: 3.71, moon: 1.62, jupiter: 24.79 };
+  const STONES = [Es.stonePolygon('left'), Es.stonePolygon('right')];
+
+  const wp = (p) => [CX + p.x * S, CY - p.y * S];
+
+  OM.register({
+    id: 'escapement',
+    title: 'Pendulum clock escapement',
+    group: 'machines',
+    hook: 'A swinging pendulum lets a toothed wheel go forward one notch at a time, and pays for it with a tiny push each swing.',
+    units: 's, m, degrees, mJ',
+    alt: 'A deadbeat clock escapement: a 30-tooth escape wheel, a two-pallet anchor rocking with a pendulum below it, and charts of the swing against time, how the period grows with swing size, and the energy pushed in against lost each swing.',
+    controls: [
+      { id: 'len', type: 'range', label: 'Pendulum length', min: 0.25, max: 2, step: 0.005, value: 0.995, dec: 3, unit: 'm' },
+      { id: 'where', type: 'seg', label: 'Where is the clock?', value: 'earth', options: [{ v: 'earth', l: 'Earth' }, { v: 'mars', l: 'Mars' }, { v: 'moon', l: 'Moon' }, { v: 'jupiter', l: 'Jupiter' }] },
+      { id: 'mass', type: 'range', label: 'Bob mass', min: 0.2, max: 10, step: 0.1, value: 2, dec: 1, unit: 'kg' },
+      { id: 'drive', type: 'range', label: 'Drive (weight or spring)', min: 0, max: 100, step: 5, value: 45, unit: '%' },
+      { id: 'kick', type: 'button', label: 'Give the pendulum a push', hint: 'A clock has to be started by hand, and so does this one after it has run down.' },
+    ],
+    content: {
+      intro: 'A falling weight or an unwinding spring would spin the clock wheels in a few seconds. The escapement holds the wheel back and lets it go one notch at a time, timed by a pendulum. In return the wheel gives the pendulum a small push on every swing, so the swing never dies out.',
+      steps: [
+        { h: 'Locked', p: 'One pallet holds a tooth of the escape wheel. The wheel is pulled on by the weight but cannot move, and the pendulum swings freely with nothing but gravity acting on it.' },
+        { h: 'Released', p: 'As the pendulum passes the middle of its swing, the pallet slides off the end of its locking face and the wheel is free to turn.' },
+        { h: 'Impulse', p: 'The tooth slides down the slanted impulse face. The wheel moves on, and the pallet is pushed the same way the pendulum is already going. That push is the energy that keeps the clock running.' },
+        { h: 'Caught', p: 'The other pallet has swung into the wheel. The next tooth drops onto it and stops dead. That drop is the tick, and one full swing has two ticks.' },
+      ],
+      principle: {
+        lead: 'The pendulum is the timekeeper. The escapement is only a gate that counts its swings and tops up its energy. The period depends on the length and on gravity, and on almost nothing else.',
+        eqs: [
+          { label: 'Period for a small swing', eq: 'T~0~ = 2π √(L / g)', note: 'L is the distance from the pivot to the centre of the bob. The mass does not appear. A pendulum 0.994 m long on Earth has T = 2 s, one tick a second.' },
+          { label: 'Period for any swing', eq: 'T = T~0~ / AGM(1, cos(A/2))', note: 'A is the amplitude, and AGM is the arithmetic-geometric mean. For small swings this is T₀ (1 + A²/16): a wider swing is a slower swing.' },
+          { label: 'Energy balance', eq: 'energy pushed in per swing = energy lost per swing', note: 'The bars in the drawing are that balance. The swing grows or shrinks until the two are equal.' },
+          { label: 'The wheel', eq: 'the wheel turns once every N × T', note: 'The wheel moves on one tooth for each full swing (two ticks). With N = 30 teeth and T = 2 s, that is 60 seconds, so a seconds hand can sit on its shaft.' },
+        ],
+        points: [
+          'The locking faces are arcs centred on the anchor pivot. The locked wheel therefore pushes straight at the pivot and gives no push and no recoil. This is the Graham dead-beat escapement. The slanted impulse faces in the picture are worked out from the path the tooth tip takes across the anchor.',
+          'Accuracy depends on the swing. A bigger swing is slightly slower, so a clock whose swing changes (a tired spring, thicker oil) changes its rate. Between 3° and 4° the difference is about 11 seconds a day.',
+          '**What this model leaves out:** the rod and bob are treated as a single point mass, and there is no temperature expansion, suspension spring, friction at the pallets, or bounce when the wheel drops. The drag is exaggerated so that the swing settles in under a minute. A real clock is many times less damped and takes much longer to settle.',
+        ],
+      },
+      myth: {
+        claim: 'A heavier pendulum swings more slowly.',
+        truth: 'The period does not depend on the mass at all. Gravity pulls harder on a heavy bob, but it is harder to move, and the two cancel exactly. Try it with the mass slider. A heavy bob does help a real clock in another way: it stores more energy, so the small pushes and puffs of air disturb it less.',
+      },
+      tries: [
+        { label: 'Seconds pendulum', text: 'About one metre gives a two-second swing and one tick a second.', set: { len: 0.995, where: 'earth', mass: 2, drive: 45 } },
+        { label: 'Short and quick', text: 'A quarter of the length gives half the period.', set: { len: 0.25, where: 'earth', drive: 45 } },
+        { label: 'On the Moon', text: 'With a sixth of the gravity the same pendulum takes about 2.5 times as long.', set: { len: 0.995, where: 'moon', drive: 45 } },
+        { label: 'Heaviest bob', text: 'Ten kilograms instead of two, and the period does not move.', set: { len: 0.995, where: 'earth', mass: 10, drive: 45 } },
+        { label: 'Wide swing', text: 'Full drive: a bigger swing, and a clock that loses minutes a day.', set: { len: 0.995, where: 'earth', drive: 100 } },
+        { label: 'Let it run down', text: 'With no drive the swing dies away until it is too small to release the wheel.', set: { len: 0.995, where: 'earth', drive: 0 } },
+      ],
+      quiz: [
+        { q: 'You make the pendulum four times longer. What happens to the period?', opts: ['It stays the same', 'It doubles', 'It quadruples', 'It halves'], a: 1, why: 'The period goes with the square root of the length, and the square root of 4 is 2.' },
+        { q: 'Which of these does not change the period of a small swing?', opts: ['The length of the pendulum', 'The strength of gravity', 'The mass of the bob', 'All three change it'], a: 2, why: 'Mass cancels out: a heavier bob is pulled harder but is also harder to move.' },
+        { q: 'Why does the escapement push the pendulum a little on every swing?', opts: ['To make it swing faster', 'To replace the energy lost to air and friction', 'To keep the wheel from turning', 'To make the tick louder'], a: 1, why: 'Without the push, drag would wear the swing away. The escapement gives back exactly what is lost, and the swing settles where the two are equal.' },
+      ],
+      sources: [
+        'M. V. Headrick, *Clock and Watch Escapement Mechanics* (1997), on the Graham dead-beat escapement.',
+        'R. A. Nelson and M. G. Olsson, "The pendulum: rich physics from a simple system", *American Journal of Physics* 54, 112 (1986).',
+        'Christiaan Huygens, *Horologium* (1658), which describes the first pendulum clock, patented in 1657.',
+      ],
+    },
+
+    create(host) {
+      const st = { c: null, hist: [], lastHist: 0, flash: 0 };
+      let L = null;
+
+      const grav = () => GRAV[host.ctl.where] || Es.G_EARTH;
+      const drive = () => D_FULL * (host.ctl.drive / 100);
+      const w0 = () => Math.sqrt(grav() / host.ctl.len);
+      const sync = () => { st.c.L = host.ctl.len; st.c.g = grav(); };
+      const stopped = () => Math.abs(st.c.th) < st.c.p.thetaI && st.c.amp < st.c.p.thetaI * 0.98;
+
+      function restart() {
+        st.c = Es.create(host.ctl.len, grav());
+        const a0 = Math.max(Es.steadyAmplitude(drive()), 0);
+        st.c.th = a0 >= st.c.p.thetaI ? a0 : 0;
+        st.c.amp = a0;
+        st.c.side = st.c.th >= 0 ? 1 : -1;
+        st.hist = []; st.lastHist = 0;
+        if (a0 >= st.c.p.thetaI) for (let i = 0; i < 1500; i++) Es.step(st.c, 0.01, drive());
+        st.c.t = 0;
+        st.hist = []; st.lastHist = 0;
+      }
+
+      const sim = {
+        ref: { w: 780, h: 560 },
+        refNarrow: { w: 420, h: 1060 },
+        state: st,
+        stepSize: 0.1,
+        init() { restart(); },
+        layout(V) {
+          L = V.narrow
+            ? { scene: { x: 10, y: 0 }, swing: { x: 14, y: 560, w: 392, h: 150 }, per: { x: 14, y: 720, w: 392, h: 170 }, bars: { x: 20, y: 920, w: 380 } }
+            : { scene: { x: 0, y: 0 }, swing: { x: 420, y: 10, w: 350, h: 170 }, per: { x: 420, y: 196, w: 350, h: 190 }, bars: { x: 430, y: 430, w: 330 } };
+        },
+        step(dt) {
+          sync();
+          Es.step(st.c, dt, drive());
+          st.flash = Math.max(0, st.flash - dt);
+          if (st.c.tick < dt + 1e-9) st.flash = 0.18;
+          st.lastHist += dt;
+          if (st.lastHist >= 1 / 30) {
+            st.lastHist = 0;
+            st.hist.push({ t: st.c.t, th: st.c.th, b: st.c.beats });
+            while (st.hist.length && st.c.t - st.hist[0].t > WINDOW + 0.5) st.hist.shift();
+          }
+        },
+        action(id) {
+          if (id !== 'kick') return;
+          const dir = st.c.w >= 0 ? 1 : -1;
+          st.c.w += dir * 0.14 * w0();
+        },
+        thumb() {
+          st.c = Es.create(host.ctl.len, grav());
+          st.c.amp = 6 * DEG;
+          st.c.th = 0.9 * DEG; st.c.side = 1; st.c.u = (st.c.p.thetaI - st.c.th) / (2 * st.c.p.thetaI);
+        },
+        onControl(id) { if (id === 'drive' || id === 'where' || id === 'len') sync(); },
+        phase() {
+          if (stopped()) return 0;
+          const c = st.c;
+          if (c.tick < 0.12) return 3;
+          if (Math.abs(c.th) < c.p.thetaI) return c.u < 0.25 ? 1 : 2;
+          return 0;
+        },
+        readouts() {
+          const c = st.c;
+          const T = Es.period(host.ctl.len, grav(), Math.max(c.amp, 1e-4));
+          const A = c.amp / DEG;
+          const lost = Es.secondsLostPerDay(c.amp);
+          const m = host.ctl.mass, l = host.ctl.len;
+          return [
+            { k: 'Period', v: fmt(T, 3) + ' s' },
+            { k: 'One tick every', v: fmt(T / 2, 3) + ' s' },
+            { k: 'Swing (each side)', v: fmt(A, 1) + '°', tone: stopped() ? 'bad' : A < 2.6 ? 'warn' : '' },
+            { k: 'Slower than a tiny swing by', v: fmt(lost, 0) + ' s a day' },
+            { k: 'Wheel turns once every', v: fmt(Es.TEETH * T, 0) + ' s' },
+            { k: 'Pushed in per swing', v: fmt(c.lastIn * m * l * l * 1000, 2) + ' mJ' },
+            { k: 'Lost per swing', v: fmt(c.lastOut * m * l * l * 1000, 2) + ' mJ' },
+          ];
+        },
+        caption() {
+          if (stopped()) return 'Stopped: the swing is too small to release the wheel';
+          return ['Wheel locked, pendulum swinging', 'Pallet letting go', 'Impulse: the tooth pushes the pallet', 'Tick: the next tooth drops onto the pallet'][sim.phase()];
+        },
+        describe() {
+          const c = st.c;
+          return stopped()
+            ? 'The clock has stopped. The swing is smaller than the escapement arc.'
+            : 'Period ' + fmt(Es.period(host.ctl.len, grav(), c.amp), 2) + ' seconds, swing ' + fmt(c.amp / DEG, 1) + ' degrees on each side.';
+        },
+
+        draw(g, V, c) {
+          drawScene(g, V, c);
+          if (V.thumb) return;
+          drawSwing(g, V, c);
+          drawPeriod(g, V, c);
+          drawBars(g, V, c);
+        },
+      };
+
+      // ------------------------------------------------------------ scene
+      function drawScene(g, V, c) {
+        const cl = st.c;
+        const th = cl.th;
+        const ink = c.ink;
+        g.save();
+        g.translate(L.scene.x, L.scene.y);
+        const piv = wp(Es.PIV);
+        const lw = (n) => V.px(n);
+
+        // pendulum: rod and bob, behind the wheel
+        const Lpx = 235 + ((host.ctl.len - 0.25) / 1.75) * 110;
+        const r = 10 + 6 * Math.cbrt(host.ctl.mass);
+        g.save();
+        g.translate(piv[0], piv[1]);
+        g.rotate(-th); // canvas rotation is clockwise, theta is counter-clockwise
+        g.strokeStyle = c.ink2; g.lineWidth = lw(3); g.lineCap = 'round';
+        g.beginPath(); g.moveTo(0, 0); g.lineTo(0, Lpx); g.stroke();
+        g.beginPath(); g.arc(0, Lpx + r, r, 0, Math.PI * 2);
+        g.fillStyle = c.hot; g.fill(); g.strokeStyle = ink; g.lineWidth = lw(2); g.stroke();
+        g.beginPath(); g.moveTo(-r * 0.6, Lpx + r); g.lineTo(r * 0.6, Lpx + r); g.strokeStyle = alpha(ink, 0.6); g.lineWidth = lw(1.2); g.stroke();
+        g.restore();
+
+        // escape wheel: thin leaning teeth on a ring with open spokes
+        const phi = Es.wheelAngle(cl);
+        const teeth = Es.TEETH, pitch = Es.PITCH, TH = Es.TOOTH;
+        const polar = (r, a) => [CX + r * Math.cos(a) * S, CY - r * Math.sin(a) * S];
+        g.beginPath();
+        for (let i = 0; i < teeth; i++) {
+          const a = Es.LOCK_A + i * pitch - phi;
+          const r1 = polar(TH.root, a - TH.lead * pitch), tip = polar(1, a), r2 = polar(TH.root, a + TH.trail * pitch);
+          if (i) g.lineTo(r1[0], r1[1]); else g.moveTo(r1[0], r1[1]);
+          g.lineTo(tip[0], tip[1]);
+          g.lineTo(r2[0], r2[1]);
+        }
+        g.closePath();
+        g.moveTo(CX + 0.62 * S, CY);
+        g.arc(CX, CY, 0.62 * S, 0, Math.PI * 2, true);
+        g.fillStyle = c.metal2; g.fill('evenodd');
+        g.strokeStyle = ink; g.lineWidth = lw(1.6); g.lineJoin = 'round'; g.stroke();
+        g.beginPath(); g.arc(CX, CY, 0.62 * S, 0, Math.PI * 2); g.lineWidth = lw(1.4); g.stroke();
+        // spokes turn with the wheel
+        g.strokeStyle = ink; g.lineWidth = lw(3.4); g.lineCap = 'butt';
+        for (let k = 0; k < 5; k++) {
+          const a = -phi + (k / 5) * Math.PI * 2 + 0.3;
+          g.beginPath(); g.moveTo(CX + 0.2 * S * Math.cos(a), CY - 0.2 * S * Math.sin(a)); g.lineTo(CX + 0.62 * S * Math.cos(a), CY - 0.62 * S * Math.sin(a)); g.stroke();
+        }
+        g.beginPath(); g.arc(CX, CY, 0.22 * S, 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.lineWidth = lw(2); g.stroke();
+        g.beginPath(); g.arc(CX, CY, 3.5, 0, Math.PI * 2); g.fillStyle = ink; g.fill();
+
+        // anchor: two arms and two thin pallet stones, riding on the pendulum
+        const tw = (q) => wp(Es.anchorToWorld(q, th));
+        g.lineCap = 'round'; g.lineJoin = 'round';
+        STONES.forEach((poly) => {
+          const a = poly[0], b = poly[poly.length - 1];
+          const e = tw({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+          g.strokeStyle = ink; g.lineWidth = lw(8.5);
+          g.beginPath(); g.moveTo(piv[0], piv[1]); g.lineTo(e[0], e[1]); g.stroke();
+          g.strokeStyle = c.metal; g.lineWidth = lw(5.5);
+          g.beginPath(); g.moveTo(piv[0], piv[1]); g.lineTo(e[0], e[1]); g.stroke();
+        });
+        STONES.forEach((poly) => {
+          g.beginPath();
+          poly.forEach((q, i) => { const p = tw(q); if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); });
+          g.closePath();
+          g.fillStyle = c.accent; g.fill();
+          g.strokeStyle = ink; g.lineWidth = lw(1.6); g.stroke();
+        });
+        g.beginPath(); g.arc(piv[0], piv[1], 7, 0, Math.PI * 2); g.fillStyle = c.paper2; g.fill(); g.lineWidth = lw(2); g.strokeStyle = ink; g.stroke();
+        g.beginPath(); g.arc(piv[0], piv[1], 2.5, 0, Math.PI * 2); g.fillStyle = ink; g.fill();
+
+        // a flash where the tooth lands
+        if (st.flash > 0 && !V.thumb) {
+          const lock = cl.side === 1 ? Es.tipAt(Es.LOCK_A) : Es.tipAt(Es.LOCK_B);
+          const p = wp(lock);
+          g.strokeStyle = alpha(c.bad, st.flash / 0.18); g.lineWidth = lw(3);
+          g.beginPath(); g.arc(p[0], p[1], V.px(10 + (0.18 - st.flash) * 90), 0, Math.PI * 2); g.stroke();
+        }
+
+        // labels
+        if (!V.thumb) {
+          text(g, V, 'anchor', piv[0] + 14, piv[1] - 10, { px: 11, color: c.ink2, halo: false });
+          text(g, V, 'escape wheel', CX - 1.08 * S, CY - 0.25 * S, { px: 11, color: c.ink2, halo: false, align: 'right' });
+          text(g, V, 'pendulum', 12, CY + S + 34, { px: 11, color: c.ink2, halo: false });
+          text(g, V, 'length ' + fmt(host.ctl.len, 3) + ' m', 12, CY + S + 49, { px: 11, mono: true, color: c.ink2, halo: false });
+          text(g, V, 'bob ' + fmt(host.ctl.mass, 1) + ' kg', 12, CY + S + 64, { px: 11, mono: true, color: c.ink2, halo: false });
+        }
+        g.restore();
+      }
+
+      // ----------------------------------------------------------- charts
+      function drawSwing(g, V, c) {
+        const f = plotFrame(g, V, c, L.swing, 'Swing angle against time, degrees', 'last 8 seconds', '');
+        const cl = st.c;
+        const AX = 12; // degrees, top of the axis
+        const t1 = cl.t, t0 = t1 - WINDOW;
+        const X = (t) => f.x0 + ((t - t0) / WINDOW) * f.w;
+        const Y = (d) => f.y0 + f.h / 2 - (d / AX) * (f.h / 2 - 3);
+        const zi = cl.p.thetaI / DEG;
+        g.fillStyle = alpha(c.accent, 0.22);
+        g.fillRect(f.x0, Y(zi), f.w, Y(-zi) - Y(zi));
+        text(g, V, 'wheel released', f.x0 + 4, Y(zi) - 3, { px: 10, color: c.ink2, halo: false });
+        line(g, V, f.x0, Y(0), f.x0 + f.w, Y(0), c.ink2, 1, [4, 3]);
+        for (const d of [10, 0, -10]) { line(g, V, f.x0 - 4, Y(d), f.x0, Y(d), c.ink, 1); text(g, V, fmt(d, 0), f.x0 - 6, Y(d) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        // ticks
+        let prevB = st.hist.length ? st.hist[0].b : 0;
+        g.strokeStyle = c.bad; g.lineWidth = V.px(1.4);
+        st.hist.forEach((hh) => {
+          if (hh.b !== prevB) {
+            const x = X(hh.t);
+            if (x >= f.x0) { g.beginPath(); g.moveTo(x, f.y0 + f.h - 10); g.lineTo(x, f.y0 + f.h); g.stroke(); }
+            prevB = hh.b;
+          }
+        });
+        g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.beginPath();
+        let started = false;
+        st.hist.forEach((hh) => {
+          const x = X(hh.t);
+          if (x < f.x0) return;
+          const y = Y(clamp(hh.th / DEG, -AX, AX));
+          if (started) g.lineTo(x, y); else { g.moveTo(x, y); started = true; }
+        });
+        g.lineTo(X(t1), Y(clamp(cl.th / DEG, -AX, AX)));
+        g.stroke();
+        g.beginPath(); g.arc(X(t1), Y(clamp(cl.th / DEG, -AX, AX)), V.px(5.5), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        text(g, V, 'tick', f.x0 + f.w, f.y0 + f.h - 12, { px: 10, color: c.bad, weight: 700, align: 'right', halo: false });
+        text(g, V, 'pendulum right of centre = +', f.x0 + f.w - 4, f.y0 + 11, { px: 10, color: c.ink2, align: 'right', halo: false });
+      }
+
+      function drawPeriod(g, V, c) {
+        const f = plotFrame(g, V, c, L.per, 'Wider swing, slower swing: period change, %', 'swing each side, degrees', '');
+        const AMAX = 40, RMAX = 1.06;
+        const X = (a) => f.x0 + (a / AMAX) * f.w;
+        const Y = (r) => f.y0 + f.h - ((r - 1) / (RMAX - 1)) * f.h;
+        for (const a of [0, 10, 20, 30, 40]) { line(g, V, X(a), f.y0 + f.h, X(a), f.y0 + f.h + 4, c.ink, 1); text(g, V, String(a), X(a), f.y0 + f.h + 15, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); }
+        for (const r of [1, 1.03, 1.06]) { line(g, V, f.x0 - 4, Y(r), f.x0, Y(r), c.ink, 1); text(g, V, fmt((r - 1) * 100, 0) + '%', f.x0 - 6, Y(r) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); }
+        line(g, V, f.x0, Y(1), f.x0 + f.w, Y(1), c.ink2, 1, [4, 3]);
+        text(g, V, 'tiny swing', f.x0 + f.w - 4, Y(1) - 5, { px: 10, color: c.ink2, align: 'right', halo: false });
+        g.strokeStyle = c.cold; g.lineWidth = V.px(2.4); g.beginPath();
+        for (let a = 0; a <= AMAX; a += 1) { const r = Es.periodRatio(a * DEG); if (a) g.lineTo(X(a), Y(r)); else g.moveTo(X(a), Y(r)); }
+        g.stroke();
+        const a = clamp(st.c.amp / DEG, 0, AMAX);
+        const r = Es.periodRatio(a * DEG);
+        g.beginPath(); g.arc(X(a), Y(r), V.px(6), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(2); g.stroke();
+        text(g, V, 'period +' + fmt((r - 1) * 100, 2) + '%', X(a) + 10, Y(r) - 10, { px: 11, mono: true, weight: 700 });
+      }
+
+      function drawBars(g, V, c) {
+        const cl = st.c, m = host.ctl.mass, l = host.ctl.len;
+        const a = cl.lastIn * m * l * l * 1000, b = cl.lastOut * m * l * l * 1000;
+        text(g, V, 'Energy in each half swing', L.bars.x, L.bars.y - 4, { px: 12, weight: 700, halo: false });
+        pairBars(g, V, c, L.bars.x, L.bars.y + 6, L.bars.w, [
+          { label: 'balance', a: { v: Math.max(a, 1e-9), text: fmt(a, 2) + ' mJ', color: c.cold, name: 'in' }, b: { v: Math.max(b, 1e-9), text: fmt(b, 2) + ' mJ', color: c.hot, name: 'lost' } },
+        ], 54);
+        text(g, V, 'in = from the drive, lost = to air drag. Equal when the swing has settled.', L.bars.x, L.bars.y + 72, { px: 10.5, color: c.ink2, halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ---- modules/16-water.js ---- */
+(function (root) {
+  'use strict';
+  const OM = root.OM;
+  const Wa = OM.water;
+  const { clamp, fmt } = OM.util;
+  const { text, line, arrow, alpha, mix, plotFrame } = OM.gfx;
+
+  const Z_MAX = 3000; // m, top of the height scale
+  const N_PART = 95;
+  const N_DROP = 46;
+  const hash = (i, k) => { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); };
+
+  OM.register({
+    id: 'water',
+    title: 'The water cycle over a mountain',
+    group: 'heat',
+    hook: 'Sunlight lifts water off the sea, a mountain wrings it out as rain, and the air on the far side comes down warm and dry.',
+    units: '°C, m, mm per day, g per kg',
+    alt: 'A side view of the sea, a coast and a mountain. Vapour rises from the sea and is carried up the windward slope, where a cloud forms above a dashed cloud-base line and rain falls and runs back to the sea in a river. The far side is dry. Below are a chart of the air temperature against height and bars showing how much water the air holds at the coast and at the crest.',
+    controls: [
+      { id: 'sea', type: 'range', label: 'Sea temperature', min: 5, max: 35, step: 1, value: 26, unit: '°C' },
+      { id: 'rh', type: 'range', label: 'Humidity of the air off the sea', min: 50, max: 100, step: 1, value: 80, unit: '%' },
+      { id: 'wind', type: 'range', label: 'Wind speed', min: 2, max: 15, step: 1, value: 7, unit: 'm/s' },
+      { id: 'ridge', type: 'range', label: 'Mountain height', min: 0, max: 3000, step: 100, value: 1800, unit: 'm' },
+    ],
+    content: {
+      intro: 'Water never leaves the Earth. The Sun lifts it off the sea as invisible vapour, rising air cools it into cloud, rain brings it down, and rivers carry it home. This drawing follows one stream of air from the sea, up a mountain and down the far side, and puts numbers on every step.',
+      steps: [
+        { h: 'Evaporation', p: 'Sunlight gives water molecules at the surface enough energy to escape as vapour. It takes about 2.5 megajoules to evaporate a kilogram of sea water, which is why evaporation cools the sea. About 90 percent of the water vapour in the air comes from oceans, lakes and rivers, and the rest from plants.' },
+        { h: 'Rising and cooling', p: 'The wind forces the damp air up the slope. Higher up the pressure is lower, so the air expands and cools, by about 9.8 °C for every kilometre while it is unsaturated.' },
+        { h: 'Condensation', p: 'Once the air has cooled to its dew point it can hold no more vapour. The vapour condenses on tiny specks into cloud droplets, and gives back the heat that evaporation took in. The air now cools more slowly, by about 4 to 6.5 °C per kilometre.' },
+        { h: 'Rain and return', p: 'Droplets join until they are heavy enough to fall. The rain runs down the slope in rivers to the sea. The air, now drier and warmed by the heat that was released, sinks on the far side and warms again at 9.8 °C per kilometre.' },
+      ],
+      principle: {
+        lead: 'The water cycle is a heat engine run by sunlight. Evaporation stores heat in the vapour, condensation releases it high up, and gravity returns the water.',
+        eqs: [
+          { label: 'Evaporation from the sea', eq: 'E = ρ C~E~ U (q~s~ − q~a~)', note: 'U is the wind speed. q_s is the vapour the air could hold right at the sea surface and q_a what it already holds. C_E is about 1.2 × 10⁻³. Double the wind and the evaporation doubles.' },
+          { label: 'How much air can hold', eq: 'e~s~ = 6.11 exp( 17.6 T / (T + 243) ) hPa', note: 'Warm air holds much more vapour: about 7 percent more for every degree. This is the Clausius–Clapeyron relation.' },
+          { label: 'Height of the cloud base', eq: 'z ≈ 125 (T − T~d~)', note: 'z in metres, with the air temperature T and the dew point T_d in °C. The drawing uses the more exact Bolton formula, which agrees to a few percent.' },
+          { label: 'Heat released by condensation', eq: 'ΔT = L~v~ Δq / c~p~', note: 'Each gram of vapour that condenses in a kilogram of air warms that air by about 2.5 °C. This is why the far side of the mountain is warmer.' },
+        ],
+        points: [
+          'The chart shows the air\'s temperature against height. The dashed grey line is where the air would be if no cloud formed. The gap at the crest is the heat released by condensation, and that same heat is what warms the air on the far side.',
+          'The air that comes down the far side has lost its water but kept the heat, and so it is warm and dry. This is the **rain shadow**, and it is why deserts lie behind many mountain ranges.',
+          '**What this model leaves out:** only a 400 m layer of air is lifted, and 60 percent of the water that condenses on the way to the crest falls as rain over a 40 km slope. The other 40 percent evaporates again on the way down the far side, which cools the sinking air a little. Real rain is patchy and varies a lot from place to place. Snow, plants, groundwater and the sea itself cooling are not modelled.',
+        ],
+      },
+      myth: {
+        claim: 'Clouds are made of water vapour.',
+        truth: 'Water vapour is an invisible gas, like the rest of the air. A cloud is made of tiny liquid droplets (or ice crystals), which form only once the vapour has condensed. The white "steam" above a kettle is the same thing: droplets, a little way from the spout where the vapour has cooled.',
+      },
+      tries: [
+        { label: 'Warm tropical sea', text: 'A warm sea, damp air and a tall mountain: heavy rain.', set: { sea: 30, rh: 85, wind: 8, ridge: 2500 } },
+        { label: 'Cold sea', text: 'Less than a third of the evaporation, and noticeably less rain.', set: { sea: 8, rh: 80, wind: 7, ridge: 1800 } },
+        { label: 'Low hills', text: 'The hills are below the cloud base, so there is no cloud and no rain.', set: { sea: 26, rh: 80, wind: 7, ridge: 300 } },
+        { label: 'Dry air', text: 'With 50 percent humidity the cloud base is about 1.4 km up. A 1.8 km ridge barely reaches it.', set: { sea: 26, rh: 50, wind: 7, ridge: 1800 } },
+        { label: 'Big mountain', text: 'The tallest ridge: most rain, and the hottest, driest air on the far side.', set: { sea: 26, rh: 80, wind: 7, ridge: 3000 } },
+        { label: 'Gale', text: 'Double the wind: double the evaporation and double the rain.', set: { sea: 26, rh: 80, wind: 14, ridge: 1800 } },
+      ],
+      quiz: [
+        { q: 'Why does the cloud start partway up the slope and not at the sea?', opts: ['The air has to rise and cool to its dew point first', 'The mountain is colder than the sea', 'Clouds only form over land', 'Sea water does not evaporate'], a: 0, why: 'Air at the sea is not cool enough to be saturated. It has to rise, expand and cool until it reaches the dew point, which for these conditions is a few hundred metres up.' },
+        { q: 'What happens to the heat taken up when the sea water evaporated?', opts: ['It is lost for good', 'It is released again when the vapour condenses into cloud', 'It warms the sea', 'It turns into wind'], a: 1, why: 'The heat is stored in the vapour (latent heat). When the vapour condenses the heat comes back, which is why air in a cloud cools more slowly as it rises.' },
+        { q: 'Why is the air on the far side of the mountain warmer and drier than when it left the sea?', opts: ['The Sun is stronger there', 'It lost its water as rain, kept the heat from condensation, and sinking air warms by compression', 'The mountain heats it', 'It came from a desert'], a: 1, why: 'Rain removes the water, condensation has added heat to the air, and air sinking down the far side warms by about 9.8 °C per kilometre as it is squeezed.' },
+      ],
+      sources: [
+        'R. R. Rogers and M. K. Yau, *A Short Course in Cloud Physics*, Pergamon (condensation level, moist adiabatic lapse rate).',
+        'D. L. Hartmann, *Global Physical Climatology*, Academic Press (evaporation, latent heat, the hydrological cycle).',
+        'D. M. Romps, "Exact expression for the lifting condensation level", *Journal of the Atmospheric Sciences* 74, 3891 (2017).',
+        'O. A. Alduchov and R. E. Eskridge, "Improved Magnus form approximation of saturation vapor pressure", *Journal of Applied Meteorology* 35, 601 (1996).',
+        'U.S. Geological Survey, Water Science School, "The Water Cycle" (evaporation and the atmosphere).',
+      ],
+    },
+
+    create(host) {
+      const st = { t: 0 };
+      let L = null;
+      let cache = null;
+
+      // Everything that depends only on the controls.
+      function model() {
+        const c = host.ctl;
+        const key = [c.sea, c.rh, c.wind, c.ridge].join('|');
+        if (!cache || cache.key !== key) {
+          const ev = Wa.evaporation(c.sea, c.rh / 100, c.wind);
+          const r = Wa.rain(c.sea, c.rh / 100, c.wind, c.ridge);
+          cache = { key, ev, rain: r.mmDay, asc: r.asc, lee: r.lee, dryTop: r.asc.tAir - Wa.GAMMA_D * c.ridge };
+        }
+        return cache;
+      }
+
+      // Geometry of the side view, in the scene's own pixels.
+      function geo() {
+        const s = L.scene;
+        const w = s.w, h = s.h;
+        const xc = 0.3 * w, xr = 0.63 * w, xl = 0.9 * w;
+        const ySea = 0.78 * h;
+        const kz = (0.66 * h) / Z_MAX;
+        const ridge = host.ctl.ridge;
+        const ground = (x) => {
+          if (x <= xc || x >= xl) return 0;
+          if (x < xr) { const u = (x - xc) / (xr - xc); return ridge * Math.pow(u, 1.25); }
+          const v = (x - xr) / (xl - xr);
+          return ridge * (1 - Math.pow(v, 1.25));
+        };
+        const Y = (z) => ySea - z * kz;
+        // x on the windward slope where the ground reaches altitude z
+        const xAt = (z) => (ridge <= 0 ? xc : xc + (xr - xc) * Math.pow(clamp(z / ridge, 0, 1), 1 / 1.25));
+        return { w, h, xc, xr, xl, ySea, kz, ground, Y, xAt, ridge };
+      }
+
+      const sim = {
+        ref: { w: 780, h: 590 },
+        refNarrow: { w: 420, h: 930 },
+        state: st,
+        init() { st.t = 0; },
+        layout(V) {
+          L = V.narrow
+            ? { scene: { x: 0, y: 6, w: 420, h: 430 }, temp: { x: 14, y: 446, w: 392, h: 270 }, bars: { x: 20, y: 742, w: 380 } }
+            : { scene: { x: 0, y: 6, w: 780, h: 356 }, temp: { x: 10, y: 372, w: 390, h: 214 }, bars: { x: 430, y: 402, w: 330 } };
+        },
+        step(dt) { st.t += dt; },
+        thumb() { st.t = 3.1; },
+        readouts() {
+          const m = model();
+          const a = m.asc;
+          const cloud = a.cloud;
+          return [
+            { k: 'Evaporation from the sea', v: fmt(m.ev.mmDay, 1) + ' mm a day' },
+            { k: 'Sunlight it uses', v: fmt(m.ev.watts, 0) + ' W/m²' },
+            { k: 'Cloud base', v: fmt(a.zLcl, 0) + ' m', tone: cloud ? '' : 'warn' },
+            { k: 'Air at the crest', v: fmt(a.Ttop, 0) + ' °C' },
+            { k: 'Rain on the slope', v: fmt(m.rain, 1) + ' mm a day' },
+            { k: 'Air on the far side', v: fmt(m.lee.T, 0) + ' °C, ' + fmt(m.lee.rh * 100, 0) + ' % damp', tone: m.lee.rh < 0.5 ? 'warn' : '' },
+          ];
+        },
+        caption() {
+          const m = model();
+          if (!m.asc.cloud) return host.ctl.ridge <= 0 ? 'Flat land: nothing lifts the air' : 'Ridge below the cloud base: dry';
+          if (m.rain >= 15) return 'Heavy rain on the windward slope';
+          if (m.rain >= 3) return 'Rain on the windward slope';
+          return 'Cloud, but little rain';
+        },
+        describe() {
+          const m = model();
+          return 'Sea evaporation ' + fmt(m.ev.mmDay, 1) + ' millimetres a day. ' + (m.asc.cloud
+            ? 'Cloud forms above ' + fmt(m.asc.zLcl, 0) + ' metres and ' + fmt(m.rain, 0) + ' millimetres a day fall on the slope. The far side is ' + fmt(m.lee.T, 0) + ' degrees and ' + fmt(m.lee.rh * 100, 0) + ' percent humid.'
+            : 'The ridge is below the cloud base, so there is no cloud or rain.');
+        },
+
+        draw(g, V, c) {
+          drawScene(g, V, c);
+          if (V.thumb) return;
+          drawTemp(g, V, c);
+          drawBars(g, V, c);
+        },
+      };
+
+      // ------------------------------------------------------------ scene
+      function drawScene(g, V, c) {
+        const m = model();
+        const o = geo();
+        const { w, h, xc, xr, xl, ySea, kz, ground, Y, xAt, ridge } = o;
+        const lw = (n) => V.px(n);
+        const a = m.asc;
+        g.save();
+        g.translate(L.scene.x, L.scene.y);
+
+        // height scale
+        if (!V.thumb) {
+          for (const z of [1000, 2000, 3000]) {
+            line(g, V, 0, Y(z), w, Y(z), alpha(c.ink3, 0.35), 1, [2, 5]);
+            text(g, V, fmt(z, 0) + ' m', w - 10, Y(z) - 3, { px: 10, mono: true, color: c.ink3, align: 'right', halo: false });
+          }
+        }
+
+        // the rain-soaked side and the dry side get a tint
+        const wet = clamp(m.rain / 30, 0, 1);
+        const dry = clamp((0.8 - m.lee.rh) / 0.6, 0, 1) * (a.cloud ? 1 : 0);
+
+        // land
+        g.beginPath();
+        g.moveTo(xc, ySea);
+        for (let x = xc; x <= xl; x += 4) g.lineTo(x, Y(ground(x)));
+        g.lineTo(xl, ySea);
+        g.lineTo(w, ySea); g.lineTo(w, h); g.lineTo(xc, h);
+        g.closePath();
+        g.fillStyle = mix(c.paper2, c.ink, 0.10); g.fill();
+        g.save(); g.clip();
+        g.fillStyle = alpha(c.cold, 0.10 + 0.22 * wet); g.fillRect(xc, 0, xr - xc, h);
+        g.fillStyle = alpha(c.hot, 0.07 + 0.22 * dry); g.fillRect(xr, 0, w - xr, h);
+        g.restore();
+        g.beginPath();
+        g.moveTo(xc, ySea);
+        for (let x = xc; x <= xl; x += 4) g.lineTo(x, Y(ground(x)));
+        g.lineTo(xl, ySea); g.lineTo(w, ySea);
+        g.strokeStyle = c.ink; g.lineWidth = lw(2); g.lineJoin = 'round'; g.stroke();
+
+        // sea
+        g.beginPath();
+        g.moveTo(0, ySea);
+        for (let x = 0; x <= xc + 1; x += 4) g.lineTo(x, ySea + Math.sin(x * 0.07 + st.t * 1.6) * 2.2);
+        g.lineTo(xc + 2, h); g.lineTo(0, h); g.closePath();
+        g.fillStyle = alpha(c.cold, 0.32); g.fill();
+        g.strokeStyle = c.cold; g.lineWidth = lw(2);
+        g.beginPath();
+        for (let x = 0; x <= xc + 1; x += 4) { const y = ySea + Math.sin(x * 0.07 + st.t * 1.6) * 2.2; if (x) g.lineTo(x, y); else g.moveTo(x, y); }
+        g.stroke();
+
+        // the sun, and the heat it puts into evaporation
+        const sunX = 0.075 * w, sunY = 0.15 * h;
+        const pulse = 1 + 0.12 * Math.sin(st.t * 2);
+        g.strokeStyle = c.accent; g.lineWidth = lw(2.2); g.lineCap = 'round';
+        for (let i = 0; i < 12; i++) {
+          const an = (i / 12) * Math.PI * 2 + st.t * 0.12;
+          g.beginPath(); g.moveTo(sunX + Math.cos(an) * 24, sunY + Math.sin(an) * 24); g.lineTo(sunX + Math.cos(an) * 24 * (1 + 0.45 * pulse), sunY + Math.sin(an) * 24 * (1 + 0.45 * pulse)); g.stroke();
+        }
+        g.beginPath(); g.arc(sunX, sunY, 17, 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = lw(2); g.stroke();
+        g.lineCap = 'butt';
+        const heat = clamp(m.ev.watts / 200, 0.1, 1);
+        for (let k = 0; k < 2; k++) {
+          const x1 = sunX + 24 + k * 16, y1 = sunY + 22 + k * 10;
+          const x2 = 0.1 * w + k * 0.075 * w, y2 = ySea - 6;
+          arrow(g, V, x1, y1, x2, y2, alpha(c.warn, 0.5 + 0.35 * heat), 1 + 1.8 * heat, 8);
+        }
+
+        // cloud base
+        const zl = a.zLcl;
+        if (zl <= Z_MAX) {
+          line(g, V, 0, Y(zl), xl, Y(zl), c.cold, 1.4, [6, 4]);
+          if (!V.thumb) text(g, V, 'cloud base ' + fmt(zl, 0) + ' m' + (a.cloud ? '' : ' (above the ridge)'), 6, Y(zl) - 5, { px: 11, color: c.cold, weight: 700 });
+        }
+
+        // wind-driven air: vapour below the cloud base, droplets in it, warm dry air after the crest
+        const speed = (16 + 9 * host.ctl.wind) / w;
+        for (let i = 0; i < N_PART; i++) {
+          const hp = 20 + Math.pow(hash(i, 1), 1.6) * 560; // metres above the surface it travels at
+          const s = (hash(i, 2) + st.t * speed * (0.8 + 0.4 * hash(i, 3))) % 1;
+          const x = s * w * 0.96;
+          let lift = x < xc ? Math.pow(x / xc, 0.7) : 1; // rising off the sea
+          const gz = ground(x);
+          const z = gz + hp * lift * (1 - 0.5 * Math.min(1, gz / Math.max(ridge, 1)));
+          const y = Y(z);
+          if (y > ySea + 1) continue;
+          const windward = x >= xc && x <= xr;
+          const inCloud = a.cloud && windward && z >= zl && gz >= zl * 0.6;
+          const lee = x > xr;
+          if (inCloud) {
+            g.beginPath(); g.arc(x, y, 4.2, 0, Math.PI * 2); g.fillStyle = alpha(c.paper, 0.92); g.fill();
+            g.strokeStyle = alpha(c.ink2, 0.75); g.lineWidth = lw(1.2); g.stroke();
+          } else {
+            g.beginPath(); g.arc(x, y, lee ? 2.4 : 2.1, 0, Math.PI * 2);
+            g.fillStyle = lee ? alpha(c.hot, 0.55) : alpha(c.cold, 0.7); g.fill();
+          }
+        }
+
+        // rain and river
+        if (a.cloud && m.rain > 0.2) {
+          const nd = Math.round(N_DROP * clamp(m.rain / 30, 0.15, 1));
+          const xs = xAt(zl), xe = xr;
+          // cloud puffs along the slope above the cloud base, then the rain under them
+          puffs(g, V, c, o, xs, 9, 0.9, wet);
+          g.strokeStyle = alpha(c.cold, 0.95); g.lineWidth = lw(1.9);
+          for (let i = 0; i < nd; i++) {
+            const x0 = xs + (xe - xs) * (0.05 + 0.9 * hash(i, 5));
+            const gy = Y(ground(x0));
+            const top = Math.max(gy - 85 * (w / 780 + 0.3), 10);
+            const p = (hash(i, 6) + st.t * 0.9) % 1;
+            const yy = top + (gy - top) * p;
+            g.beginPath(); g.moveTo(x0 - 4 * (1 - p), yy - 7); g.lineTo(x0 - 4 * (1 - p) + 1.6, yy); g.stroke();
+          }
+        } else if (a.cloud) {
+          puffs(g, V, c, o, xAt(zl), 5, 0.7, 0);
+        }
+        // river back to the sea
+        g.lineCap = 'round';
+        g.strokeStyle = m.rain > 0.2 ? c.cold : alpha(c.ink3, 0.6);
+        g.lineWidth = lw(1.2 + 3 * clamp(m.rain / 30, 0, 1));
+        g.setLineDash([V.px(7), V.px(6)]);
+        g.lineDashOffset = -V.px(((st.t * 26) % 13) * -1);
+        g.beginPath();
+        const rx0 = xc + (xr - xc) * 0.72;
+        for (let x = rx0; x >= xc; x -= 4) { const y = Y(ground(x)) + 1; if (x === rx0) g.moveTo(x, y); else g.lineTo(x, y); }
+        g.lineTo(xc - 10, ySea + 4);
+        g.stroke();
+        g.setLineDash([]); g.lineDashOffset = 0; g.lineCap = 'butt';
+
+        // labels
+        if (!V.thumb) {
+          const lx0 = 6;
+          text(g, V, 'evaporation', lx0, ySea + 20, { px: 11, weight: 700, color: c.ink, halo: false });
+          text(g, V, fmt(m.ev.mmDay, 1) + ' mm a day', lx0, ySea + 34, { px: 10.5, mono: true, color: c.ink2, halo: false });
+          text(g, V, 'uses ' + fmt(m.ev.watts, 0) + ' W/m²', lx0, ySea + 48, { px: 10.5, mono: true, color: c.ink2, halo: false });
+          text(g, V, 'wind ' + fmt(host.ctl.wind, 0) + ' m/s', lx0, ySea + 63, { px: 10.5, mono: true, color: c.ink2, halo: false });
+          arrow(g, V, lx0 + 74, ySea + 59, lx0 + 108, ySea + 59, c.ink2, 1.6, 8);
+          if (a.cloud) text(g, V, m.rain >= 0.2 ? 'rain ' + fmt(m.rain, 0) + ' mm a day' : 'cloud', (xAt(zl) + xr) / 2, Math.max(Y(ridge) - 50, 16), { px: 11.5, weight: 700, color: c.cold, align: 'center' });
+          text(g, V, 'river back to the sea', xc + 10, ySea + 18, { px: 10.5, color: c.ink2, halo: false });
+          const shadow = a.cloud && m.rain >= 0.2;
+          text(g, V, shadow ? 'rain shadow' : 'air on the far side', w - 8, ySea + 20, { px: 11.5, weight: 700, color: c.hot, align: 'right', halo: false });
+          text(g, V, fmt(m.lee.T, 0) + ' °C, ' + fmt(m.lee.rh * 100, 0) + ' % damp', w - 8, ySea + 35, { px: 10.5, mono: true, color: c.ink2, align: 'right', halo: false });
+        }
+        g.restore();
+      }
+
+      function puffs(g, V, c, o, xs, n, alp, wet) {
+        const { w, xr, Y, ground, ridge } = o;
+        const z0 = geoZl();
+        const sc = w / 780 + 0.35;
+        const grey = mix(c.paper, c.ink, 0.12 * wet);
+        for (let k = 0; k <= n; k++) {
+          const x0 = Math.min(xs + (xr - xs + 14) * (k / n), xr + 14);
+          const zb = Math.max(ground(x0), z0);
+          const yc = Y(zb) - 17 * sc - (k % 2) * 7;
+          const r = (10 + (k % 3) * 2.2) * sc;
+          g.fillStyle = alpha(grey, alp); g.strokeStyle = alpha(c.ink2, 0.75); g.lineWidth = V.px(1.2);
+          g.beginPath(); g.arc(x0, yc, r, 0, Math.PI * 2); g.fill(); g.stroke();
+          g.beginPath(); g.arc(x0 + r * 0.9, yc + 3 * sc, r * 0.72, 0, Math.PI * 2); g.fill(); g.stroke();
+        }
+      }
+      const geoZl = () => model().asc.zLcl;
+
+      // ------------------------------------------------ air temperature chart
+      function drawTemp(g, V, c) {
+        const m = model();
+        const a = m.asc;
+        const ridge = host.ctl.ridge;
+        const f = plotFrame(g, V, c, L.temp, 'Temperature of the air against height', 'temperature, °C', '');
+        const TMIN = -25, TMAX = 50;
+        const X = (t) => f.x0 + ((t - TMIN) / (TMAX - TMIN)) * f.w;
+        const Y = (z) => f.y0 + f.h - (z / Z_MAX) * f.h;
+        for (const t of [-20, 0, 20, 40]) { line(g, V, X(t), f.y0 + f.h, X(t), f.y0 + f.h + 4, c.ink, 1); text(g, V, String(t), X(t), f.y0 + f.h + 15, { px: 10, mono: true, align: 'center', color: c.ink2, halo: false }); }
+        for (const z of [0, 1000, 2000, 3000]) { line(g, V, f.x0 - 4, Y(z), f.x0, Y(z), c.ink, 1); text(g, V, fmt(z, 0), f.x0 - 6, Y(z) + 4, { px: 10, mono: true, align: 'right', color: c.ink2, halo: false }); line(g, V, f.x0, Y(z), f.x0 + f.w, Y(z), alpha(c.ink3, 0.25), 1, [2, 4]); }
+        text(g, V, 'height, m', f.x0 + 6, f.y0 + 10, { px: 10, color: c.ink2, halo: false });
+        // the ridge
+        if (ridge > 0) {
+          g.fillStyle = alpha(c.ink, 0.08);
+          g.fillRect(f.x0, f.y0 + f.h - (ridge / Z_MAX) * f.h, f.w, (ridge / Z_MAX) * f.h);
+        }
+        // what dry cooling alone would give
+        const t0 = a.tAir;
+        const dry = (z) => t0 - Wa.GAMMA_D * z;
+        g.setLineDash([V.px(5), V.px(4)]);
+        g.strokeStyle = c.ink3; g.lineWidth = V.px(1.6);
+        g.beginPath(); g.moveTo(X(dry(0)), Y(0)); g.lineTo(X(dry(Z_MAX)), Y(Z_MAX)); g.stroke();
+        g.setLineDash([]);
+        {
+          const lx = X(dry(2800));
+          const onLeft = lx > f.x0 + 100;
+          text(g, V, 'cooling with no cloud', lx + (onLeft ? -6 : 8), Y(2800) + 3, { px: 10, color: c.ink3, align: onLeft ? 'right' : 'left', halo: false });
+        }
+        // the parcel, dry then moist
+        if (ridge > 0) {
+          g.lineWidth = V.px(3); g.lineCap = 'round'; g.lineJoin = 'round';
+          let prevCloud = false;
+          g.strokeStyle = c.ink;
+          g.beginPath(); g.moveTo(X(a.path[0].T), Y(0));
+          a.path.forEach((p, i) => {
+            if (i === 0) return;
+            if (p.cloud && !prevCloud) { g.stroke(); g.strokeStyle = c.cold; g.beginPath(); g.moveTo(X(a.path[i - 1].T), Y(a.path[i - 1].z)); }
+            g.lineTo(X(p.T), Y(p.z));
+            prevCloud = p.cloud;
+          });
+          g.stroke();
+          // down the far side
+          g.setLineDash([V.px(5), V.px(3)]);
+          g.strokeStyle = c.hot; g.lineWidth = V.px(2.6);
+          g.beginPath(); g.moveTo(X(a.Ttop), Y(ridge)); g.lineTo(X(m.lee.T), Y(0)); g.stroke();
+          g.setLineDash([]); g.lineCap = 'butt';
+          // markers
+          const dot = (x, y, col) => { g.beginPath(); g.arc(x, y, V.px(5.5), 0, Math.PI * 2); g.fillStyle = col; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(1.8); g.stroke(); };
+          dot(X(a.tAir), Y(0), c.accent);
+          if (a.cloud) { dot(X(t0 - Wa.GAMMA_D * a.zLcl), Y(a.zLcl), c.paper); text(g, V, 'cloud base', X(t0 - Wa.GAMMA_D * a.zLcl) - 10, Y(a.zLcl) + 4, { px: 10.5, color: c.cold, weight: 700, align: 'right' }); }
+          dot(X(a.Ttop), Y(ridge), c.accent);
+          dot(X(m.lee.T), Y(0), c.hot);
+          text(g, V, 'sea', X(a.tAir) - 8, Y(0) - 8, { px: 10.5, color: c.ink2, align: 'right', halo: false });
+          text(g, V, 'far side', X(m.lee.T) + 8, Y(0) - 8, { px: 10.5, color: c.hot, weight: 700 });
+          if (a.cloud && ridge > a.zLcl + 100) {
+            const gap = a.Ttop - m.dryTop;
+            const right = X(a.Ttop) < f.x0 + f.w * 0.55;
+            text(g, V, 'latent heat: +' + fmt(gap, 1) + ' °C', X(a.Ttop) + (right ? 10 : -10), Y(ridge) - 6, { px: 10.5, color: c.bad, weight: 700, align: right ? 'left' : 'right' });
+          }
+        } else {
+          g.beginPath(); g.arc(X(a.tAir), Y(0), V.px(5.5), 0, Math.PI * 2); g.fillStyle = c.accent; g.fill(); g.strokeStyle = c.ink; g.lineWidth = V.px(1.8); g.stroke();
+          text(g, V, 'flat land: the air is not lifted', f.x0 + f.w / 2, f.y0 + f.h / 2, { px: 11, color: c.ink2, align: 'center' });
+        }
+      }
+
+      // --------------------------------------------------- water in the air
+      function drawBars(g, V, c) {
+        const m = model();
+        const a = m.asc;
+        const x = L.bars.x, y = L.bars.y, w = L.bars.w;
+        text(g, V, 'Water in each kilogram of air, grams', x, y - 4, { px: 12, weight: 700, halo: false });
+        const rows = [
+          { k: 'At the coast', v: a.q0 * 1000, col: c.cold },
+          { k: 'At the crest', v: a.qtop * 1000, col: alpha(c.cold, 0.55) },
+          { k: 'Fell as rain', v: a.condensed * Wa.PRECIP_EFF * 1000, col: c.accent },
+          { k: 'Far side', v: m.lee.q * 1000, col: c.hot },
+        ];
+        const labelW = 96;
+        const max = 30;
+        const barMax = Math.max(40, w - labelW - 70);
+        rows.forEach((r, i) => {
+          const yy = y + 10 + i * 28;
+          text(g, V, r.k, x, yy + 13, { px: 11, color: c.ink2, halo: false });
+          const bw = Math.max(2, (r.v / max) * barMax);
+          g.fillStyle = r.col; g.fillRect(x + labelW, yy, bw, 18);
+          g.strokeStyle = c.ink; g.lineWidth = V.px(1.2); g.strokeRect(x + labelW, yy, bw, 18);
+          const extra = r.k === 'Far side' ? '  ' + fmt(m.lee.rh * 100, 0) + ' % damp' : '';
+          text(g, V, fmt(r.v, 1) + extra, x + labelW + bw + 6, yy + 13, { px: 11, mono: true, weight: 600, halo: false });
+        });
+        text(g, V, 'Warm air can carry far more vapour than cold air.', x, y + 10 + 4 * 28 + 6, { px: 10.5, color: c.ink2, halo: false });
+      }
+      return sim;
+    },
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ---- core/30-sim.js ---- */
 /* Simulation host.
  *
@@ -6480,7 +8168,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         h('div', { class: 'hero-copy' },
           h('p', { class: 'eyebrow', text: 'Interactive drawings' }),
           h('h1', { id: 'page-h', tabindex: '-1' }, 'How things ', h('span', { class: 'mark', text: 'really' }), ' work.'),
-          h('p', { class: 'hero-sub', text: 'Thirteen machines, circuits and systems you can poke. Each one runs on the equations engineers use, with the numbers beside the picture, and each one says what it leaves out.' })),
+          h('p', { class: 'hero-sub', text: 'Sixteen machines, circuits and systems you can poke. Each one runs on the equations engineers use, with the numbers beside the picture, and each one says what it leaves out.' })),
         h('div', { class: 'hero-art' }, heroCanvas)),
       h('section', { class: 'lib-tools', 'aria-label': 'Filter the library' },
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Topic' }, chipBtns),
@@ -6753,7 +8441,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
         h('p', { class: 'mech-hook', text: 'OmniMechanics is a library of live drawings. Every one is a working simulation, and every one puts numbers next to the picture so you can see cause and effect.' })),
       h('div', { class: 'about-grid' },
         section('a-trust', 'How far can you trust the numbers?', [
-          h('p', null, rich('Each model is written from the equations engineers actually use, then checked by automated tests against known results. The engine is compared with typical figures for a small petrol engine. Orbits are checked against Kepler\'s law and conservation of energy. The wing\'s lift is calculated two independent ways and the answers must agree. The logic adder is tested on every possible input.')),
+          h('p', null, rich('Each model is written from the equations engineers actually use, then checked by automated tests against known results. The engine is compared with typical figures for a small petrol engine. Orbits are checked against Kepler\'s law and conservation of energy. The wing\'s lift is calculated two independent ways and the answers must agree. The logic adder is tested on every possible input. The cam follower has to leave the cam at exactly the speed the equations predict, the pendulum period is checked against the exact large-swing result, and the warming on the far side of the mountain must equal the heat the rain released.')),
           h('p', null, rich('The models are simplified on purpose, and every page lists what it leaves out. Treat the values as realistic teaching numbers. They are not design data for building anything real.'))]),
         section('a-read', 'Reading the drawings', [
           h('ul', { class: 'legend' },
@@ -6822,6 +8510,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
   'use strict';
   function boot() {
     if (!OM.mods.length) throw new Error('No mechanisms registered');
+    OM.finalize();
     OM.ui.start();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
