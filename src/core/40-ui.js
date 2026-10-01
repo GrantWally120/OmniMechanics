@@ -255,7 +255,7 @@
         h('div', { class: 'hero-copy' },
           h('p', { class: 'eyebrow', text: 'Interactive drawings' }),
           h('h1', { id: 'page-h', tabindex: '-1' }, 'How things ', h('span', { class: 'mark', text: 'really' }), ' work.'),
-          h('p', { class: 'hero-sub', text: 'Sixteen machines, circuits and systems you can poke. Each one runs on the equations engineers use, with the numbers beside the picture, and each one says what it leaves out.' })),
+          h('p', { class: 'hero-sub', text: 'Nineteen machines, circuits and systems you can poke. Each one runs on the equations engineers use, with the numbers beside the picture, and each one says what it leaves out.' })),
         h('div', { class: 'hero-art' }, heroCanvas)),
       h('section', { class: 'lib-tools', 'aria-label': 'Filter the library' },
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Topic' }, chipBtns),
@@ -614,7 +614,7 @@
         h('p', { class: 'mech-hook', text: 'OmniMechanics is a library of live drawings. Every one is a working simulation, and every one puts numbers next to the picture so you can see cause and effect.' })),
       h('div', { class: 'about-grid' },
         section('a-trust', 'How far can you trust the numbers?', [
-          h('p', null, rich('Each model is written from the equations engineers actually use, then checked by automated tests against known results. The engine is compared with typical figures for a small petrol engine. Orbits are checked against Kepler\'s law and conservation of energy. The wing\'s lift is calculated two independent ways and the answers must agree. The logic adder is tested on every possible input. The cam follower has to leave the cam at exactly the speed the equations predict, the pendulum period is checked against the exact large-swing result, and the warming on the far side of the mountain must equal the heat the rain released.')),
+          h('p', null, rich('Each model is written from the equations engineers actually use, then checked by automated tests against known results. The engine is compared with typical figures for a small petrol engine. Orbits are checked against Kepler\'s law and conservation of energy. The wing\'s lift is calculated two independent ways and the answers must agree. The logic adder is tested on every possible input. The cam follower has to leave the cam at exactly the speed the equations predict, the pendulum period is checked against the exact large-swing result, and the warming on the far side of the mountain must equal the heat the rain released. The wind turbine can never beat the Betz limit of 16/27, the solar panel\'s maximum power point is checked against a brute-force search, and the three rays through the lens must all meet at the image.')),
           h('p', null, rich('The models are simplified on purpose, and every page lists what it leaves out. Treat the values as realistic teaching numbers. They are not design data for building anything real.'))]),
         section('a-read', 'Reading the drawings', [
           h('ul', { class: 'legend' },

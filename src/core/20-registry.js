@@ -16,9 +16,9 @@
 
   const groups = [
     { id: 'machines', name: 'Machines and forces', blurb: 'Engines, gears and lifting: how small pushes become big ones.' },
-    { id: 'electric', name: 'Electricity and logic', blurb: 'Motors, transformers and the gates that add numbers.' },
-    { id: 'heat', name: 'Heat, air and water', blurb: 'Cooling, lift and pressure.' },
-    { id: 'signals', name: 'Waves, signals and space', blurb: 'Silence made from sound, position from time, orbits from falling.' },
+    { id: 'electric', name: 'Electricity and logic', blurb: 'Motors, transformers, solar panels and the gates that add numbers.' },
+    { id: 'heat', name: 'Heat, air and water', blurb: 'Cooling, lift, rain and wind: heat and air at work.' },
+    { id: 'signals', name: 'Waves, signals and space', blurb: 'Silence made from sound, position from time, orbits from falling, images from glass.' },
   ];
 
   const mods = [];
