@@ -29,6 +29,13 @@ blueprint, and it follows your system setting or the toggle in the header.
 | 15 | GPS | Pseudoranges, solving for the clock error, Gauss–Newton step by step |
 | 16 | Orbits and Newton's cannon | Free fall with sideways speed, circular, elliptical and escape orbits |
 
+## Putting it on Google Drive
+
+Drive cannot run web pages, and the app is too big to paste through a chat, so `loader/OmniMechanics-loader.html`
+is a 7 KB starter page. Put it in Drive (or anywhere), download it and open it in a browser. It fetches
+`OmniMechanics.html` from this repository, keeps a copy in the browser, and from then on opens offline. When
+you are online it always fetches the newest build first. `node tests/e2e/loader.cjs` tests it.
+
 ## Accuracy
 
 Every model in `src/lib/` is plain JavaScript that is unit-tested against known results, for example:

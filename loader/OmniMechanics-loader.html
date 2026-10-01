@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniMechanics</title>
+<style>
+:root { color-scheme: light dark; --bg: #f6f8f4; --ink: #16211b; --ink2: #53625a; --accent: #f5c400; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0f1b2a; --ink: #e6f0ff; --ink2: #9db4d3; } }
+html, body { height: 100%; margin: 0; }
+body { display: grid; place-items: center; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { width: min(92vw, 28rem); padding: 1.5rem 0; }
+h1 { font-size: 1.7rem; margin: 0 0 .15rem; letter-spacing: -.01em; }
+h1 b { background: linear-gradient(transparent 62%, var(--accent) 62%); }
+p { margin: .3rem 0; color: var(--ink2); }
+.bar { height: 10px; border: 2px solid var(--ink); margin: 1.1rem 0 .8rem; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 28%; background: var(--accent); animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(360%); } }
+@media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 55%; } }
+.row { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+button, .btn { font: inherit; font-weight: 700; color: var(--ink); background: var(--accent); border: 2px solid var(--ink); padding: .45rem .9rem; cursor: pointer; text-decoration: none; }
+.btn.alt { background: transparent; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Omni<b>Mechanics</b></h1>
+  <p id="msg" role="status">Starting…</p>
+  <div class="bar" id="bar" aria-hidden="true"><i></i></div>
+  <div id="fail" hidden>
+    <p>The app could not be downloaded just now, and there is no saved copy on this device yet. Check the connection and try again. The first load needs the internet; after that the app is kept on this device and opens without it.</p>
+    <div class="row">
+      <button id="retry" type="button">Try again</button>
+      <a class="btn alt" href="https://github.com/GrantWally120/OmniMechanics/blob/claude/quirky-mayer-vfzyy6/OmniMechanics.html">Get the file</a>
+    </div>
+  </div>
+  <noscript><p>This page needs JavaScript.</p></noscript>
+</main>
+<script>
+/* OmniMechanics starter.
+ * The full app is one 580 KB HTML file. This small page fetches it from GitHub, keeps a copy in the
+ * browser (IndexedDB) so later visits work offline, and then shows it. Network first, so you always
+ * get the newest build when you are online. Open this page as ...?src=URL to load a different copy. */
+(function () {
+  'use strict';
+  var SOURCES = [
+    'https://raw.githubusercontent.com/GrantWally120/OmniMechanics/claude/quirky-mayer-vfzyy6/OmniMechanics.html',
+    'https://cdn.jsdelivr.net/gh/GrantWally120/OmniMechanics@claude/quirky-mayer-vfzyy6/OmniMechanics.html',
+    'https://raw.githubusercontent.com/GrantWally120/OmniMechanics/main/OmniMechanics.html'
+  ];
+  var override = new URLSearchParams(location.search).get('src');
+  if (override) SOURCES = [override];
+  var KEY = 'html';
+  var $ = function (id) { return document.getElementById(id); };
+  var msg = $('msg');
+
+  // a download counts only if it looks like the whole app, not an error page or half a file
+  function looksRight(t) {
+    return typeof t === 'string' && t.length > 250000 && /<title>OmniMechanics/.test(t.slice(0, 4000)) && /<\/html>\s*$/.test(t);
+  }
+
+  // ---- saved copy
+  function db() {
+    return new Promise(function (ok, no) {
+      var r = indexedDB.open('omnimechanics-loader', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('f'); };
+      r.onsuccess = function () { ok(r.result); };
+      r.onerror = function () { no(r.error); };
+    });
+  }
+  function load() {
+    return db().then(function (d) {
+      return new Promise(function (ok) {
+        var q = d.transaction('f').objectStore('f').get(KEY);
+        q.onsuccess = function () { ok(q.result || null); };
+        q.onerror = function () { ok(null); };
+      });
+    }).catch(function () { return null; });
+  }
+  function save(text) {
+    return db().then(function (d) {
+      return new Promise(function (ok) {
+        var t = d.transaction('f', 'readwrite');
+        t.objectStore('f').put({ text: text, at: Date.now() }, KEY);
+        t.oncomplete = ok; t.onerror = ok; t.onabort = ok;
+      });
+    }).catch(function () {});
+  }
+
+  // ---- download, with a time limit and a running byte count
+  function download(url, ms) {
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, ms);
+    var sep = url.indexOf('?') < 0 ? '?' : '&';
+    return fetch(url + sep + 't=' + Date.now(), { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (!res.body || !res.body.getReader) return res.text();
+        var rd = res.body.getReader(), dec = new TextDecoder('utf-8'), out = '', got = 0;
+        return (function pump() {
+          return rd.read().then(function (x) {
+            if (x.done) return out + dec.decode();
+            got += x.value.length;
+            out += dec.decode(x.value, { stream: true });
+            msg.textContent = 'Downloading… ' + (got / 1048576).toFixed(1) + ' MB';
+            return pump();
+          });
+        })();
+      })
+      .then(function (t) { clearTimeout(timer); return t; }, function (e) { clearTimeout(timer); throw e; });
+  }
+  function firstGood(i, ms) {
+    if (i >= SOURCES.length) return Promise.resolve(null);
+    return download(SOURCES[i], ms).then(function (t) {
+      return looksRight(t) ? t : firstGood(i + 1, ms);
+    }, function () { return firstGood(i + 1, ms); });
+  }
+
+  // ---- show the app
+  function run(html) {
+    document.open();
+    document.write(html);
+    document.close();
+  }
+  function fail() {
+    msg.textContent = 'Could not load.';
+    $('bar').hidden = true;
+    $('fail').hidden = false;
+  }
+  function start() {
+    $('fail').hidden = true;
+    $('bar').hidden = false;
+    msg.textContent = 'Looking for the latest version…';
+    load().then(function (saved) {
+      var haveSaved = saved && looksRight(saved.text);
+      // with a saved copy to fall back on, do not keep the reader waiting on a slow network
+      return firstGood(0, haveSaved ? 4000 : 25000).then(function (fresh) {
+        if (fresh) { save(fresh); run(fresh); }
+        else if (haveSaved) { msg.textContent = 'Offline. Opening the copy saved on this device…'; run(saved.text); }
+        else fail();
+      });
+    });
+  }
+  $('retry').addEventListener('click', start);
+  start();
+})();
+</script>
+</body>
+</html>
