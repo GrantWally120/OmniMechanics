@@ -28,6 +28,7 @@
       { id: 'where', type: 'seg', label: 'Where is the clock?', value: 'earth', options: [{ v: 'earth', l: 'Earth' }, { v: 'mars', l: 'Mars' }, { v: 'moon', l: 'Moon' }, { v: 'jupiter', l: 'Jupiter' }] },
       { id: 'mass', type: 'range', label: 'Bob mass', min: 0.2, max: 10, step: 0.1, value: 2, dec: 1, unit: 'kg' },
       { id: 'drive', type: 'range', label: 'Drive (weight or spring)', min: 0, max: 100, step: 5, value: 45, unit: '%' },
+      { id: 'sound', type: 'toggle', label: 'Sound: tick and tock', value: false, hint: 'A short click on every beat. Off until you switch it on.' },
       { id: 'kick', type: 'button', label: 'Give the pendulum a push', hint: 'A clock has to be started by hand, and so does this one after it has run down.' },
     ],
     content: {
@@ -91,7 +92,7 @@
     },
 
     create(host) {
-      const st = { c: null, hist: [], lastHist: 0, flash: 0 };
+      const st = { c: null, hist: [], lastHist: 0, flash: 0, heard: 0 };
       let L = null;
 
       const grav = () => GRAV[host.ctl.where] || Es.G_EARTH;
@@ -110,6 +111,7 @@
         if (a0 >= st.c.p.thetaI) for (let i = 0; i < 1500; i++) Es.step(st.c, 0.01, drive());
         st.c.t = 0;
         st.hist = []; st.lastHist = 0;
+        st.heard = st.c.beats;
       }
 
       const sim = {
@@ -126,6 +128,10 @@
         step(dt) {
           sync();
           Es.step(st.c, dt, drive());
+          if (st.c.beats !== st.heard) {
+            if (host.ctl.sound && OM.audio) OM.audio.tick(st.c.beats % 2 ? 1 : 0.8, 0.7, 40);
+            st.heard = st.c.beats;
+          }
           st.flash = Math.max(0, st.flash - dt);
           if (st.c.tick < dt + 1e-9) st.flash = 0.18;
           st.lastHist += dt;
@@ -145,7 +151,7 @@
           st.c.amp = 6 * DEG;
           st.c.th = 0.9 * DEG; st.c.side = 1; st.c.u = (st.c.p.thetaI - st.c.th) / (2 * st.c.p.thetaI);
         },
-        onControl(id) { if (id === 'drive' || id === 'where' || id === 'len') sync(); },
+        onControl(id, v) { if (id === 'drive' || id === 'where' || id === 'len') sync(); if (id === 'sound' && v && OM.audio) OM.audio.prime(); },
         phase() {
           if (stopped()) return 0;
           const c = st.c;

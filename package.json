@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "test": "node --test \"tests/unit/*.test.js\"",
-    "test:e2e": "node tests/e2e/run.cjs",
+    "test:e2e": "node tests/e2e/run.cjs && node tests/e2e/features.cjs && node tests/e2e/loader.cjs",
     "check": "npm run build && npm test && npm run test:e2e"
   },
   "engines": {

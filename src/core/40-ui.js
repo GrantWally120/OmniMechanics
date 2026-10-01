@@ -1,10 +1,11 @@
 /* Shell, router and views.
  * Routes use plain fragments (#engine, #about, and no fragment for the library)
- * so deep links survive hosts that only pass simple anchors. */
+ * so deep links survive hosts that only pass simple anchors. A mechanism link can also carry
+ * its control values: #cam?rpm=3600&law=harmonic (only values that differ from the defaults). */
 (function (root) {
   'use strict';
   const OM = root.OM || (root.OM = {});
-  const { h, clear, rich, richText, store } = OM.util;
+  const { h, clear, rich, richText, store, clamp } = OM.util;
 
   let current = null; // active stage
   let cleanup = []; // functions to run when leaving a view
@@ -23,6 +24,87 @@
     updateRailChecks();
   }
   const isDone = (id) => !!(progress()[id] && progress()[id].done);
+
+  // ---------------------------------------------------------------- links, random pick
+  // "#cam?rpm=900" -> { id: 'cam', params: URLSearchParams }
+  function parseHash() {
+    const raw = (location.hash || '').replace(/^#\/?/, '');
+    const q = raw.indexOf('?');
+    let id = q < 0 ? raw : raw.slice(0, q);
+    try { id = decodeURIComponent(id); } catch (e) { /* keep as written */ }
+    return { id, params: new URLSearchParams(q < 0 ? '' : raw.slice(q + 1)) };
+  }
+
+  function randomMechanism() {
+    const here = parseHash().id;
+    const pool = OM.mods.filter((m) => m.id !== here);
+    const m = pool[Math.floor(Math.random() * pool.length)];
+    if (m) location.hash = '#' + m.id;
+  }
+
+  // ---------------------------------------------------------------- keyboard shortcuts
+  const SHORTCUTS = [
+    ['Space or K', 'Play or pause the animation'],
+    ['R', 'Restart the animation'],
+    ['.', 'Step forward a little'],
+    ['1 2 3 4', 'Animation speed: 0.25×, 0.5×, 1×, 2×'],
+    ['[ and ]', 'Previous and next mechanism'],
+    ['X', 'A random mechanism'],
+    ['G', 'Back to the library'],
+    ['/', 'Search the library'],
+    ['T', 'Change the colour theme'],
+    ['?', 'Show this list'],
+  ];
+  const keysOn = () => store.get('keys', true) !== false;
+  let helpDlg = null;
+
+  function openHelp() {
+    if (!helpDlg) {
+      const sw = h('input', { type: 'checkbox', id: 'keys-on', checked: keysOn() });
+      sw.addEventListener('change', () => store.set('keys', sw.checked));
+      const close = h('button', { type: 'button', class: 'btn btn-primary', text: 'Close' });
+      helpDlg = h('dialog', { class: 'help', 'aria-labelledby': 'help-t' },
+        h('h2', { id: 'help-t', text: 'Keyboard shortcuts' }),
+        h('table', { class: 'keys' },
+          h('tbody', null, SHORTCUTS.map((r) => h('tr', null, h('th', { scope: 'row' }, h('kbd', { text: r[0] })), h('td', { text: r[1] }))))),
+        h('label', { class: 'keys-toggle', for: 'keys-on' }, sw, ' Use these shortcuts'),
+        h('p', { class: 'keys-note', text: 'They only work when you are not typing in a box, and the sliders, buttons and arrow keys work either way.' }),
+        h('div', { class: 'row' }, close));
+      close.addEventListener('click', () => helpDlg.close());
+      helpDlg.addEventListener('click', (ev) => { if (ev.target === helpDlg) helpDlg.close(); });
+      document.body.appendChild(helpDlg);
+    }
+    helpDlg.querySelector('#keys-on').checked = keysOn();
+    if (typeof helpDlg.showModal === 'function') { if (!helpDlg.open) helpDlg.showModal(); }
+    else helpDlg.setAttribute('open', '');
+  }
+
+  function onKey(ev) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.defaultPrevented) return;
+    const t = ev.target;
+    const tag = t && t.tagName;
+    const typing = (tag === 'INPUT' && /^(text|search|number|email|url|password|tel)$/i.test(t.type || 'text')) || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable);
+    if (typing) return;
+    if (document.querySelector('dialog[open]')) return;
+    if (!keysOn()) return;
+    const role = (t && t.getAttribute && t.getAttribute('role')) || '';
+    const onControl = tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'SUMMARY' || /^(radio|switch|slider|button|link|tab)$/.test(role);
+    const k = ev.key;
+    const st = current;
+    let used = true;
+    if (k === '?') openHelp();
+    else if (k === '/') { const el = document.getElementById('lib-search'); if (el) el.focus(); else { location.hash = '#'; setTimeout(() => { const e2 = document.getElementById('lib-search'); if (e2) e2.focus(); }, 60); } }
+    else if (k === 'x' || k === 'X') randomMechanism();
+    else if (k === 'g' || k === 'G') location.hash = '#';
+    else if (k === 't' || k === 'T') { const b = document.getElementById('theme-btn'); if (b) b.click(); }
+    else if ((k === '[' || k === ']') && st) { const i = st.def.order + (k === ']' ? 1 : -1); if (OM.mods[i]) location.hash = '#' + OM.mods[i].id; }
+    else if ((k === ' ' || k === 'k' || k === 'K') && st && !(k === ' ' && onControl)) st.togglePlay();
+    else if ((k === 'r' || k === 'R') && st) st.restart();
+    else if (k === '.' && st) st.stepOnce();
+    else if (/^[1-4]$/.test(k) && st) st.setSpeed([0.25, 0.5, 1, 2][+k - 1]);
+    else used = false;
+    if (used) ev.preventDefault();
+  }
 
   // ---------------------------------------------------------------- shell
   const THEME_MODES = ['auto', 'light', 'dark'];
@@ -66,6 +148,9 @@
       if (mq.addEventListener) mq.addEventListener('change', on);
     }
 
+    const helpBtn = h('button', { type: 'button', class: 'hbtn', id: 'help-btn', 'aria-label': 'Keyboard shortcuts', title: 'Keyboard shortcuts (?)' }, h('span', { class: 'help-q', 'aria-hidden': 'true', text: '?' }));
+    helpBtn.addEventListener('click', openHelp);
+
     menuBtn = h('button', { type: 'button', class: 'hbtn menu-btn', 'aria-expanded': 'false', 'aria-controls': 'rail', 'aria-label': 'Mechanisms menu' },
       h('@svg', { viewBox: '0 0 24 24', width: 18, height: 18, 'aria-hidden': 'true', class: 'ico' }, h('@path', { d: 'M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z', fill: 'currentColor' })),
       h('span', { class: 'hbtn-lbl', text: 'Mechanisms' }));
@@ -83,7 +168,7 @@
         h('nav', { class: 'top-nav', 'aria-label': 'Site' },
           h('a', { href: '#', id: 'nav-library', text: 'Library' }),
           h('a', { href: '#about', id: 'nav-about', text: 'About' })),
-        themeBtn));
+        h('div', { class: 'header-tools' }, helpBtn, themeBtn)));
 
     railEl = h('nav', { class: 'rail', id: 'rail', 'aria-label': 'Mechanisms' });
     railEl.appendChild(h('div', { class: 'rail-top' },
@@ -111,6 +196,7 @@
 
     clear(app).append(skip, header, h('div', { class: 'layout' }, railEl, h('div', { class: 'content' }, mainEl, footer)), backdrop);
     document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && railEl.classList.contains('open')) { toggleRail(false); menuBtn.focus(); } });
+    document.addEventListener('keydown', onKey);
   }
 
   function toggleRail(open) {
@@ -157,6 +243,12 @@
     const search = h('input', { type: 'search', id: 'lib-search', class: 'search', placeholder: 'Search mechanisms', 'aria-label': 'Search mechanisms', autocomplete: 'off' });
     const chipBtns = filters.map((f) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(f.id === 'all'), dataset: { g: f.id }, text: f.name }));
     const count = h('span', { class: 'lib-count' });
+    const surprise = h('button', { type: 'button', class: 'btn', id: 'surprise', text: 'Surprise me' });
+    surprise.addEventListener('click', randomMechanism);
+    const doneN = OM.mods.filter((m) => isDone(m.id)).length;
+    const progressEl = h('div', { class: 'lib-progress' },
+      h('p', { class: 'lib-progress-t' }, h('b', { text: doneN + ' of ' + OM.mods.length }), ' quick checks finished on this device'),
+      h('div', { class: 'meter', role: 'img', 'aria-label': doneN + ' of ' + OM.mods.length + ' quick checks finished' }, h('i', { style: { width: (OM.mods.length ? (doneN / OM.mods.length) * 100 : 0) + '%' } })));
 
     const node = h('div', { class: 'view view-home' },
       h('section', { class: 'hero' },
@@ -167,8 +259,8 @@
         h('div', { class: 'hero-art' }, heroCanvas)),
       h('section', { class: 'lib-tools', 'aria-label': 'Filter the library' },
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Topic' }, chipBtns),
-        h('div', { class: 'lib-search-wrap' }, search, count)),
-      grid, empty);
+        h('div', { class: 'lib-search-wrap' }, search, count, surprise)),
+      progressEl, grid, empty);
 
     const cards = OM.mods.map((m) => {
       const cv = h('canvas', { class: 'thumb', 'aria-hidden': 'true' });
@@ -316,7 +408,7 @@
     return h('section', { class: 'notes-sec', 'aria-labelledby': id }, h('h2', { id, text: title }), kids);
   }
 
-  function viewMech(def) {
+  function viewMech(def, params) {
     document.title = def.title + ' · OmniMechanics';
     markActive(def.id);
     const ct = def.content;
@@ -339,10 +431,69 @@
 
     stage = OM.createStage(def, {
       onPhase(i) { stepEls.forEach((el, k) => { el.classList.toggle('is-now', k === i); if (k === i) el.setAttribute('aria-current', 'step'); else el.removeAttribute('aria-current'); }); },
-      onControl(_id, _v, user) { if (user) tryBtns.forEach((x) => x.setAttribute('aria-pressed', 'false')); },
+      onControl(_id, _v, user) { if (user) tryBtns.forEach((x) => x.setAttribute('aria-pressed', 'false')); if (stage && stage.onChange) stage.onChange(); },
     });
     current = stage;
     OM.debug.stage = stage;
+
+    // Shareable setups: the link carries every control that differs from its default.
+    const defaults = {};
+    def.controls.forEach((c) => { if (c.id && c.type !== 'button' && c.type !== 'heading') defaults[c.id] = c.value; });
+    const fromParams = (q) => {
+      const set = {};
+      def.controls.forEach((c) => {
+        if (!c.id || !q.has(c.id)) return;
+        const raw = q.get(c.id);
+        if (c.type === 'range') { const v = parseFloat(raw); if (Number.isFinite(v)) set[c.id] = clamp(v, c.min, c.max); }
+        else if (c.type === 'seg') { const o = c.options.find((x) => String(x.v) === raw); if (o) set[c.id] = o.v; }
+        else if (c.type === 'toggle') { if (raw === '1' || raw === '0') set[c.id] = raw === '1'; }
+      });
+      return set;
+    };
+    let urlTimer = 0;
+    const writeUrl = () => {
+      clearTimeout(urlTimer);
+      const vals = stage.values();
+      const q = new URLSearchParams();
+      Object.keys(defaults).forEach((k) => { if (vals[k] !== defaults[k]) q.set(k, typeof vals[k] === 'boolean' ? (vals[k] ? '1' : '0') : String(vals[k])); });
+      const target = '#' + def.id + (q.toString() ? '?' + q.toString() : '');
+      if (location.hash !== target) { try { history.replaceState(null, '', target); } catch (e) { /* some hosts forbid it */ } }
+    };
+    const syncUrl = () => { clearTimeout(urlTimer); urlTimer = setTimeout(writeUrl, 150); };
+    cleanup.push(() => clearTimeout(urlTimer));
+    const shared = fromParams(params || new URLSearchParams());
+    if (Object.keys(shared).length) { stage.applyPreset({ label: 'Shared setup', set: shared }); stage.restart(); }
+    stage.onChange = syncUrl;
+
+    // Reset and copy-link buttons under the controls
+    const say = h('span', { class: 'ctl-status', role: 'status' });
+    let sayTimer = 0;
+    const note = (msg) => { say.textContent = msg; clearTimeout(sayTimer); sayTimer = setTimeout(() => { say.textContent = ''; }, 3000); };
+    cleanup.push(() => clearTimeout(sayTimer));
+    const resetBtn = h('button', { type: 'button', class: 'btn', text: 'Reset controls' });
+    resetBtn.addEventListener('click', () => {
+      stage.applyPreset({ label: 'Default setup', set: defaults });
+      stage.restart();
+      writeUrl();
+      note('Controls reset.');
+    });
+    const copyBtn = h('button', { type: 'button', class: 'btn', text: 'Copy link to this setup' });
+    copyBtn.addEventListener('click', () => {
+      writeUrl();
+      const url = location.href;
+      const fallback = () => {
+        try {
+          const ta = h('textarea', { 'aria-hidden': 'true', tabindex: '-1', style: { position: 'fixed', opacity: '0', top: '0' } });
+          ta.value = url; document.body.appendChild(ta); ta.select();
+          const ok = document.execCommand && document.execCommand('copy');
+          ta.remove();
+          note(ok ? 'Link copied.' : 'Copy the address from the address bar.');
+        } catch (e) { note('Copy the address from the address bar.'); }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(() => note('Link copied.'), fallback);
+      else fallback();
+    });
+    if (stage.controlsEl && !stage.controlsEl.hidden) stage.controlsEl.appendChild(h('div', { class: 'ctl-actions' }, resetBtn, copyBtn, say));
 
     // Principle
     const p = ct.principle;
@@ -445,6 +596,13 @@
     return section('h-quiz', 'Quick check', [items, status]);
   }
 
+  function resetProgress() {
+    const msg = h('span', { class: 'ctl-status', role: 'status' });
+    const b = h('button', { type: 'button', class: 'btn', text: 'Forget my finished quick checks' });
+    b.addEventListener('click', () => { store.set('progress', {}); updateRailChecks(); msg.textContent = 'Done. Nothing is marked as finished now.'; });
+    return h('div', { class: 'ctl-actions' }, b, msg);
+  }
+
   function viewAbout() {
     document.title = 'About · OmniMechanics';
     markActive(null, 'about');
@@ -471,7 +629,10 @@
             h('li', null, rich('Every animation has **Play/Pause**, **Step** and a speed control. If your device asks for reduced motion, animations start paused.')),
             h('li', null, rich('Sliders work with the arrow keys. Diagrams you can drag also respond to the arrow keys when focused.')),
             h('li', null, rich('The **quick check** at the bottom of each page remembers what you have finished on this device only.')),
-            h('li', null, 'The whole thing is one file. It works offline and sends nothing anywhere.'))]),
+            h('li', null, rich('Every setup has its own link. Move the sliders, then press **Copy link to this setup**, and whoever opens it sees the same thing.')),
+            h('li', null, rich('Press **?** for the keyboard shortcuts. Space plays and pauses, **[** and **]** move between mechanisms, and **X** picks one at random.')),
+            h('li', null, 'The whole thing is one file. It works offline and sends nothing anywhere.')),
+          resetProgress()]),
         section('a-credit', 'Credits', [
           h('p', null, rich('Type is Archivo by Omnibus-Type, under the SIL Open Font License 1.1. Numbers for R-134a are fitted to standard refrigerant tables. Each mechanism page lists the textbooks its equations come from.'))])));
   }
@@ -488,14 +649,14 @@
 
   // ---------------------------------------------------------------- router
   function route() {
-    const raw = decodeURIComponent((location.hash || '').replace(/^#\/?/, ''));
+    const { id: raw, params } = parseHash();
     leave();
     let node;
     if (!raw || raw === 'main') node = viewHome();
     else if (raw === 'about') node = viewAbout();
     else {
       const def = OM.getMod(raw);
-      node = def ? viewMech(def) : viewMissing(raw);
+      node = def ? viewMech(def, params) : viewMissing(raw);
     }
     clear(mainEl).appendChild(node);
     updateRailChecks();

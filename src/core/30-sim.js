@@ -493,6 +493,14 @@
       },
       getPlaying: () => playing,
       setPlaying,
+      isStatic,
+      // used by the keyboard shortcuts
+      togglePlay() { if (!isStatic) setPlaying(!playing); },
+      restart() { core.reset(); core.draw(); updateReadouts(true); announceSoon('Restarted.'); },
+      stepOnce() { if (isStatic) return; if (playing) setPlaying(false); core.step(sim.stepSize || 0.05); core.draw(); updateReadouts(true); },
+      setSpeed(v) { if (!isStatic && [0.25, 0.5, 1, 2].indexOf(v) >= 0) setSpeed(v); },
+      // current control values, and the values the controls started with
+      values() { return Object.assign({}, core.ctl); },
       destroy() {
         destroyed = true;
         cancelAnimationFrame(raf);

@@ -383,6 +383,27 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 3px solid var
 .eq figcaption { padding: 5px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; background: var(--paper); border-bottom: 1px solid var(--line-strong); color: var(--ink-2); }
 .eq-line { padding: 10px 12px; font-family: var(--font-mono); font-size: 16px; font-weight: 600; overflow-x: auto; white-space: nowrap; }
 .eq-note { padding: 0 12px 10px; font-size: 13.5px; color: var(--ink-2); }
+/* ---------------------------------------------------------- actions, help, progress */
+.header-tools { display: flex; align-items: center; gap: var(--space-2); }
+.help-q { font-family: var(--font-mono); font-weight: 800; font-size: 15px; line-height: 1; }
+.ctl-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding-top: var(--space-2); border-top: 1px dashed var(--line-strong); }
+.ctl-status { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+.lib-progress { display: grid; gap: 6px; padding: var(--space-4) 0 0; max-width: 28rem; }
+.lib-progress-t { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.lib-progress-t b { color: var(--ink); }
+.meter { height: 10px; border: 1.5px solid var(--ink); background: var(--paper-2); }
+.meter i { display: block; height: 100%; background: var(--accent); }
+dialog.help { width: min(92vw, 32rem); padding: var(--space-6); border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); box-shadow: 6px 6px 0 var(--ink); }
+dialog.help::backdrop { background: rgba(10, 18, 14, 0.5); }
+dialog.help h2 { margin: 0 0 var(--space-3); font-size: 20px; }
+.keys { width: 100%; border-collapse: collapse; margin-bottom: var(--space-4); }
+.keys th, .keys td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
+.keys th { width: 38%; font-weight: 400; white-space: nowrap; }
+kbd { font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; padding: 2px 7px; border: 1.5px solid var(--ink); border-bottom-width: 3px; border-radius: 4px; background: var(--paper-2); }
+.keys-toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.keys-note { margin: var(--space-2) 0 var(--space-4); font-size: 13px; color: var(--ink-2); }
+dialog.help .row { display: flex; justify-content: flex-end; }
+
 /* ---------------------------------------------------- parts, field notes, level */
 .pips { display: inline-flex; gap: 3px; vertical-align: middle; }
 .pips i { display: block; width: 9px; height: 9px; border: 1.5px solid var(--ink); border-radius: 50%; }

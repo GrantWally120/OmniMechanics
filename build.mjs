@@ -24,7 +24,7 @@ const list = (d) => (existsSync(join(src, d)) ? readdirSync(join(src, d)).filter
 
 // Script order: core utilities, registry, physics libraries, mechanisms, then the runtime that uses them.
 const order = [
-  ...['00-util.js', '10-gfx.js', '20-registry.js'].map((f) => 'core/' + f),
+  ...['00-util.js', '10-gfx.js', '20-registry.js', '25-audio.js'].map((f) => 'core/' + f),
   ...list('lib').map((f) => 'lib/' + f),
   ...list('modules').map((f) => 'modules/' + f),
   ...['30-sim.js', '40-ui.js'].map((f) => 'core/' + f),
