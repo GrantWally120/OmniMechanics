@@ -59,6 +59,19 @@
         { q: 'Why do headphones cancel low rumble better than high-pitched sounds?', opts: ['High sounds are louder', 'A fixed electronic delay is a small fraction of a long, low-pitched wave but a big fraction of a short, high-pitched one', 'The microphone cannot hear high sounds', 'Low sounds are lighter'], a: 1, why: 'Phase error is 360° × f × τ. It grows in proportion to the pitch.' },
         { q: 'The anti-noise is exactly as loud as the noise but 90° out of timing. What happens?', opts: ['Complete silence', 'Half as loud', 'About 1.4 times as loud', 'No change'], a: 2, why: '| 1 + e^{i 90°} | = √2, about 1.41. A poorly timed anti-noise adds to the noise.' },
       ],
+      era: 'Lueg, 1934',
+      level: 4,
+      parts: [
+        { name: 'Outside microphone', note: 'Listens to the noise before it reaches your ear.' },
+        { name: 'Electronics', note: 'Delay and invert the signal so that it is the mirror image of the noise.' },
+        { name: 'Speaker', note: 'Plays the mirror-image sound beside the noise.' },
+        { name: 'Ear cup', note: 'Blocks high pitches on its own. The electronics deal with the low ones.' },
+      ],
+      facts: [
+        'Paul Lueg filed the first patent for cancelling sound with an inverted copy of it in 1934, long before there was electronics able to do it well.',
+        'Amar Bose came up with the idea for noise-cancelling headphones on a flight from Europe in 1978. His first headset flew on the Voyager, the plane that flew non-stop around the world in 1986.',
+        'It works best on steady, low-pitched noise such as engine drone. High pitches change too quickly and are mostly blocked by the ear cups themselves.',
+      ],
       sources: [
         'S. M. Kuo and D. R. Morgan, *Active Noise Control Systems*, Wiley (1996).',
         'P. A. Nelson and S. J. Elliott, *Active Control of Sound*, Academic Press (1992).',

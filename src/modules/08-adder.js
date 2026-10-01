@@ -57,6 +57,19 @@
         { q: 'Which gate gives the sum bit when you add two bits (ignoring any carry)?', opts: ['AND', 'OR', 'XOR', 'NOT'], a: 2, why: 'XOR is 1 when exactly one input is 1. 0+0 is 0, 0+1 and 1+0 are 1, and 1+1 is 0 with a carry.' },
         { q: 'Why is the top bit of a ripple-carry adder the last to settle?', opts: ['It has the most gates', 'Its carry input has to travel through all the columns below it first', 'It is the biggest number', 'Its wires are longer'], a: 1, why: 'Each column must wait for the carry from the column before it, so the delay grows with the number of bits.' },
       ],
+      era: 'Shannon, 1937',
+      level: 2,
+      parts: [
+        { name: 'XOR gate', note: 'Gives 1 when exactly one input is 1. It makes the sum bit.' },
+        { name: 'AND gate', note: 'Gives 1 only when both inputs are 1. It spots when a carry is made.' },
+        { name: 'OR gate', note: 'Combines the two possible carries of a full adder.' },
+        { name: 'Carry chain', note: 'Passes the carry from each bit to the next, and is what makes a ripple adder slow.' },
+      ],
+      facts: [
+        'Claude Shannon showed in his 1937 master\'s thesis that Boolean algebra describes switching circuits, which is the idea behind every digital computer.',
+        'A full adder takes five gates: two XOR, two AND and one OR. A processor does not use a plain ripple chain for 64 bits. It uses carry-lookahead, so that the carries do not have to pass through 64 stages one after another.',
+        'Everything a computer does with numbers comes down to adders. Subtraction is adding a negative number, and multiplication is a series of shifts and additions.',
+      ],
       sources: [
         'D. M. Harris and S. L. Harris, *Digital Design and Computer Architecture*, Morgan Kaufmann.',
       ],

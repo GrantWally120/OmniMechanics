@@ -64,6 +64,20 @@
         { q: 'With that 9 to 1 area ratio the small piston moves 90 mm. How far does the big piston rise?', opts: ['810 mm', '90 mm', '30 mm', '10 mm'], a: 3, why: 'Volume is conserved, so the travel is divided by the area ratio: 90 ÷ 9 = 10 mm.' },
         { q: 'Why does a brake pedal feel spongy when there is air in the line?', opts: ['Air is lighter than fluid', 'The air bubble compresses, so the pedal has to travel further before the pressure can build', 'Air makes the fluid boil', 'The pads get hotter'], a: 1, why: 'Liquid is almost incompressible but air squashes easily. Some of your pedal travel goes into squeezing the bubble.' },
       ],
+      era: 'Pascal, 1663',
+      level: 2,
+      parts: [
+        { name: 'Pump piston', note: 'The small piston you push. It makes the pressure.' },
+        { name: 'Load piston', note: 'The large piston that lifts the weight.' },
+        { name: 'Fluid', note: 'Oil or brake fluid. It hardly compresses, so it passes the pressure on at once.' },
+        { name: 'Lever', note: 'Gives a second multiplication of force at the handle.' },
+        { name: 'Air bubble', note: 'Not meant to be there. Air compresses, and so takes up some of the push.' },
+      ],
+      facts: [
+        'Pascal described the principle in a treatise that was published in 1663, after his death. Joseph Bramah patented the first hydraulic press in 1795.',
+        'Brake fluid soaks up water from the air. With 3 percent water it can boil at a temperature about a quarter lower, and the bubbles of vapour make the pedal spongy.',
+        'Large excavators work at up to about 350 bar, which is around 350 times atmospheric pressure.',
+      ],
       sources: [
         'Y. A. Çengel and J. M. Cimbala, *Fluid Mechanics: Fundamentals and Applications* (pressure and Pascal’s law).',
       ],

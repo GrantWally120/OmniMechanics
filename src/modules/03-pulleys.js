@@ -61,6 +61,20 @@
         { q: 'The load rises 0.5 m with 4 supporting ropes. How much rope do you pull through your hands?', opts: ['0.5 m', '1 m', '2 m', '4 m'], a: 2, why: 'Each of the 4 supporting segments shortens by 0.5 m, so 4 × 0.5 = 2 m has to pass through your hands.' },
         { q: 'Why does a real six-pulley system need more than one sixth of the weight to lift it?', opts: ['Friction in each wheel takes a little of the tension', 'Gravity is stronger on long ropes', 'Six ropes cannot share a load equally', 'The rope gets heavier'], a: 0, why: 'Every wheel loses a few percent of the tension passing through it, and the losses add up across the system.' },
       ],
+      era: 'Ancient',
+      level: 1,
+      parts: [
+        { name: 'Fixed block', note: 'Hangs from the ceiling or a beam and never moves.' },
+        { name: 'Moving block', note: 'Hangs from the load and rises with it.' },
+        { name: 'Sheaves', note: 'The grooved wheels the rope runs over.' },
+        { name: 'Rope', note: 'Carries the tension. Every rope between the blocks holds up its share of the load.' },
+        { name: 'Free end', note: 'The end you pull. It is not counted as a supporting rope.' },
+      ],
+      facts: [
+        'Ancient writers tell how Archimedes launched a heavily loaded ship with a compound pulley. Whatever the truth of the story, the mechanics in it is exactly right.',
+        'A lift hangs a counterweight over a pulley so that the motor only has to lift the difference in weight between the car and the counterweight.',
+        'Rescue teams plan hauling systems with a theoretical and an actual mechanical advantage, because friction in the pulleys eats into the ideal figure, as the model here shows.',
+      ],
       sources: [
         'D. Halliday, R. Resnick and J. Walker, *Fundamentals of Physics* (work, energy and simple machines).',
       ],

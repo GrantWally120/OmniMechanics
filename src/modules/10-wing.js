@@ -73,6 +73,20 @@
         { q: 'Two air particles split at the nose of the wing. Which one reaches the trailing edge first in this simulation?', opts: ['The one underneath', 'They arrive together', 'The one over the top', 'It depends on the colour'], a: 2, why: 'The air over the top moves faster and arrives well ahead. Nothing forces the two to meet again.' },
         { q: 'What happens to the lift when the angle of attack is raised well beyond about 15°?', opts: ['It keeps growing in a straight line', 'The air separates from the top surface and the lift drops: a stall', 'It becomes zero exactly', 'The wing gets thicker'], a: 1, why: 'The smooth flow round the top breaks down, the suction collapses and the lift falls. It is why pilots lower the nose to recover.' },
       ],
+      era: 'Kutta, 1902',
+      level: 5,
+      parts: [
+        { name: 'Leading edge', note: 'The rounded front, where the air meets the wing.' },
+        { name: 'Trailing edge', note: 'The sharp back edge. The air has to leave it smoothly.' },
+        { name: 'Upper surface', note: 'Where the air is fastest and the pressure lowest.' },
+        { name: 'Chord', note: 'The straight line from the leading edge to the trailing edge.' },
+        { name: 'Angle of attack', note: 'The angle between the chord and the oncoming air.' },
+      ],
+      facts: [
+        'Martin Kutta saw in 1902 that air leaves a wing smoothly at its sharp trailing edge. Nikolai Joukowski gave the exact link between circulation and lift in 1906.',
+        'A wing stalls when the air can no longer follow the top surface, at around 15 degrees of angle of attack for a typical wing. The model here does the same.',
+        'The air over the top of a wing gets to the back first, not at the same time as the air underneath. The equal transit time story is wrong, and the pressure map shows what really happens.',
+      ],
       sources: [
         'J. D. Anderson Jr., *Fundamentals of Aerodynamics*, McGraw-Hill (potential flow, the Kutta condition, thin airfoil theory).',
         'I. H. Abbott and A. E. von Doenhoff, *Theory of Wing Sections*, Dover (1959).',

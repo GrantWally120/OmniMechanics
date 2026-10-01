@@ -59,6 +59,20 @@
         { q: 'What does the commutator do?', opts: ['Cools the coil', 'Reverses the current in the coil every half turn so the torque keeps the same direction', 'Stores charge', 'Measures the speed'], a: 1, why: 'Without it the coil would swing to the vertical and stop, or rock back and forth.' },
         { q: 'You double the battery voltage and leave the load alone. What roughly happens to the no-load speed?', opts: ['It halves', 'It stays the same', 'It doubles', 'It quadruples'], a: 2, why: 'The motor speeds up until the back-EMF (k × speed) almost equals the battery, so the no-load speed is V ÷ k.' },
       ],
+      era: 'Sturgeon, 1832',
+      level: 3,
+      parts: [
+        { name: 'Field magnets', note: 'Make the magnetic field the coil sits in.' },
+        { name: 'Rotor coil', note: 'The loop of wire that carries the current and is pushed round.' },
+        { name: 'Commutator', note: 'A split ring that reverses the current every half turn.' },
+        { name: 'Brushes', note: 'Press on the commutator and carry the current in.' },
+        { name: 'Shaft', note: 'Carries the torque out to the load.' },
+      ],
+      facts: [
+        'Michael Faraday made a wire turn around a magnet in 1821. William Sturgeon built the first commutator motor that could turn machinery in 1832, and Emily and Thomas Davenport patented a practical one in 1837.',
+        'Electric motors and the machines they drive use somewhere between 40 and 55 percent of all the electricity in the world, according to estimates from the International Energy Agency.',
+        'A motor is also a generator. In regenerative braking the motor of an electric car or train is run backwards and turns motion into electricity.',
+      ],
       sources: [
         'S. J. Chapman, *Electric Machinery Fundamentals*, McGraw-Hill (DC machines).',
       ],

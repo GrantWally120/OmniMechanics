@@ -66,6 +66,20 @@
         { q: 'You double the cam speed, from 1,000 to 2,000 rpm. The force needed to accelerate the follower becomes…', opts: ['2 times bigger', '4 times bigger', '8 times bigger', 'the same'], a: 1, why: 'Acceleration is proportional to the speed squared, so twice the speed means four times the acceleration and four times the force.' },
         { q: 'The cycloidal law has a higher peak acceleration than the harmonic law. Why is it used for fast cams?', opts: ['It is cheaper to cut', 'Its acceleration starts and ends at zero, so the force changes gently and there is less knocking and wear', 'It lifts the follower higher', 'It needs no spring'], a: 1, why: 'Smooth changes of force avoid jolts (high jerk) that set the follower vibrating and hammer the cam. The price is a higher peak force.' },
       ],
+      era: 'Ancient',
+      level: 3,
+      parts: [
+        { name: 'Cam', note: 'The shaped disc. Its outline is the motion plan.' },
+        { name: 'Roller follower', note: 'Rides on the edge and carries the output motion.' },
+        { name: 'Return spring', note: 'Holds the follower against the cam and brings it back down.' },
+        { name: 'Guide', note: 'Lets the follower move only up and down.' },
+        { name: 'Camshaft', note: 'The shaft that turns the cam and keeps its timing against the rest of the machine.' },
+      ],
+      facts: [
+        'Water-powered trip hammers worked by cams were common in China by the 1st century AD, and al-Jazari described camshafts in detail in 1206.',
+        'A music box plays its tune from a barrel of pins, which is a bank of cams: a program that cannot be erased.',
+        'Ducati\'s racing engines of the 1950s used desmodromic valves, which close the valve with a second cam instead of a spring, so valve float cannot happen. Ducati\'s road bikes got them from the late 1960s.',
+      ],
       sources: [
         'R. L. Norton, *Design of Machinery*, McGraw-Hill (cam design, motion laws, pressure angle, follower dynamics).',
         'J. E. Shigley and J. J. Uicker, *Theory of Machines and Mechanisms*, Oxford University Press (cam profile geometry).',

@@ -61,6 +61,21 @@
         { q: 'One key cut is 0.5 mm too deep. What happens?', opts: ['A driver pin sits partly inside the plug and blocks it', 'A key pin pokes into the housing and blocks it', 'Nothing, the lock opens', 'The spring breaks'], a: 0, why: 'A deeper cut lets the key pin sit lower, which pulls the driver pin down across the shear line.' },
         { q: 'How many different keys are there with five pins and nine possible cut depths?', opts: ['45', '59,049', '3,125', '9,000'], a: 1, why: 'Nine choices for each of five cuts: 9⁵ = 59,049.' },
       ],
+      era: 'Yale, 1861',
+      level: 2,
+      parts: [
+        { name: 'Key', note: 'Its cuts push each pin stack to a different height.' },
+        { name: 'Key pins', note: 'Touch the key. Their lengths differ.' },
+        { name: 'Driver pins', note: 'Sit on top of the key pins and are pushed down by the springs.' },
+        { name: 'Springs', note: 'Push each pin stack toward the key.' },
+        { name: 'Plug', note: 'The cylinder that turns when the lock is opened.' },
+        { name: 'Shear line', note: 'The gap between the plug and the housing. Only when every pin is exactly on it can the plug turn.' },
+      ],
+      facts: [
+        'Wooden pin locks were used in ancient Egypt around 4,000 years ago. Their pins dropped into a wooden bolt, the same idea in a different material.',
+        'Linus Yale Sr. made the first modern pin tumbler lock in 1848. His son Linus Yale Jr. patented the small flat key with notched edges in 1861, and that design is still the one in use.',
+        'With five pins and nine cut depths this model has 59,049 possible keys. Real locks allow fewer, because neighbouring cuts cannot be too different in depth.',
+      ],
       sources: [
         'M. W. Tobias, *Locks, Safes and Security*, Charles C Thomas (2nd edition, 2000).',
       ],

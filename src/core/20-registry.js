@@ -6,7 +6,8 @@
  *     units,                                // shown in the drawing title block
  *     controls: [ {id, type, label, ...} ], // see core/30-sim.js for control types
  *     create(host) -> sim,                  // sim: {ref, init, step, draw, readouts, ...}
- *     content: { steps, principle, myth, tries, quiz, sources },
+ *     content: { intro, steps, principle, myth, tries, quiz, sources,
+ *                era, level (1 to 5), parts: [{name, note}], facts: [text] },
  *   }
  * register() validates the shape so a typo fails loudly at load time. */
 (function (root) {
@@ -43,6 +44,10 @@
     });
     const ct = def.content;
     if (!ct || !ct.steps || !ct.steps.length || !ct.principle || !ct.myth || !ct.quiz || !ct.quiz.length) fail(id, 'incomplete content');
+    if (typeof ct.era !== 'string' || !ct.era) fail(id, 'content needs an era');
+    if (!(ct.level >= 1 && ct.level <= 5)) fail(id, 'content.level must be 1 to 5');
+    if (!Array.isArray(ct.parts) || ct.parts.length < 3 || ct.parts.some((p) => !p.name || !p.note)) fail(id, 'content needs at least 3 parts with name and note');
+    if (!Array.isArray(ct.facts) || ct.facts.length < 2) fail(id, 'content needs at least 2 facts');
     ct.quiz.forEach((q, i) => {
       if (!(q.a >= 0 && q.a < q.opts.length)) fail(id, 'quiz ' + i + ' answer index out of range');
     });

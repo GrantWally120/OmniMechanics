@@ -179,7 +179,8 @@
             h('span', { class: 'card-no', text: m.number }),
             h('span', { class: 'card-done', text: 'Quiz done', hidden: !isDone(m.id) })),
           h('h3', { text: m.title }),
-          h('p', { text: m.hook })));
+          h('p', { text: m.hook }),
+          h('div', { class: 'card-meta' }, pips(m.content.level), h('span', { class: 'card-era', text: m.content.era }))));
       return { m, el, cv };
     });
 
@@ -297,6 +298,12 @@
     return () => { dead = true; cancelAnimationFrame(raf); if (ro) ro.disconnect(); if (io) io.disconnect(); off(); };
   }
 
+  // Five dots, filled up to the level: how hard the idea is.
+  function pips(level) {
+    return h('span', { class: 'pips', role: 'img', 'aria-label': 'Difficulty ' + level + ' of 5' },
+      [1, 2, 3, 4, 5].map((i) => h('i', { class: i <= level ? 'on' : '' })));
+  }
+
   // A box that can scroll sideways must also be reachable with the keyboard, but only when it really overflows.
   function scrollable(el) {
     const check = () => { el.tabIndex = el.scrollWidth > el.clientWidth + 1 ? 0 : -1; };
@@ -375,13 +382,18 @@
       h('header', { class: 'mech-head' },
         h('p', { class: 'eyebrow' }, def.number, ' · ', grp.name),
         h('h1', { id: 'page-h', tabindex: '-1', text: def.title }),
-        h('p', { class: 'mech-hook' }, rich(ct.intro || def.hook))),
+        h('p', { class: 'mech-hook' }, rich(ct.intro || def.hook)),
+        h('p', { class: 'mech-meta' },
+          h('span', null, h('span', { class: 'meta-k', text: 'Origin' }), ct.era),
+          h('span', null, h('span', { class: 'meta-k', text: 'Level' }), pips(ct.level)))),
       h('div', { class: 'mech-grid' },
         h('div', { class: 'mech-stage' }, stage.sheet, stage.controlsEl),
         h('div', { class: 'mech-notes' },
           section('h-steps', 'What you are seeing', h('ol', { class: 'steps' }, stepEls)),
+          section('h-parts', 'The parts', h('dl', { class: 'parts' }, ct.parts.map((x) => h('div', { class: 'part' }, h('dt', { text: x.name }), h('dd', null, rich(x.note)))))),
           principle,
           myth,
+          section('h-facts', 'Field notes', h('ul', { class: 'facts' }, ct.facts.map((f) => h('li', null, rich(f))))),
           tryBtns.length ? section('h-try', 'Try this', h('div', { class: 'tries' }, tryBtns)) : null,
           quiz,
           sources)),

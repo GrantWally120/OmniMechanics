@@ -67,6 +67,20 @@
         { q: 'Why does the spark fire before the piston reaches the top of the compression stroke?', opts: ['The flame takes time to spread, so the pressure peak should land just after the top', 'Fuel burns faster while the piston is rising', 'To clear the exhaust from the last cycle', 'So the valves have time to close'], a: 0, why: 'The mixture needs several milliseconds to burn. Lighting it early puts the pressure peak about 10 to 15° after the top, where it pushes the piston hardest.' },
         { q: 'Why does a nearly closed throttle waste energy during the intake stroke?', opts: ['The spark gets weaker', 'The piston must pull air past the restriction, so the cylinder pressure drops far below the exhaust side and the stroke costs work', 'Less air makes the crank heavier', 'It does not, the piston coasts'], a: 1, why: 'The pressure during intake falls well below the exhaust pressure, so the piston does negative work. The pumping loop on the diagram shows it.' },
       ],
+      era: 'Otto engine, 1876',
+      level: 3,
+      parts: [
+        { name: 'Piston', note: 'Slides up and down in the cylinder. The burning gas pushes it down.' },
+        { name: 'Connecting rod and crankshaft', note: 'Turn the up-and-down push into rotation.' },
+        { name: 'Inlet and exhaust valves', note: 'Open at the right moments to let the fresh mixture in and the burnt gas out.' },
+        { name: 'Camshaft', note: 'Turns at half the crank speed, so each valve opens once every two turns.' },
+        { name: 'Spark plug', note: 'Lights the mixture shortly before the piston reaches the top.' },
+      ],
+      facts: [
+        'Alphonse Beau de Rochas patented the four-stroke cycle in 1862 but never built an engine. Nikolaus Otto built the first practical one in 1876, and in 1886 his patent was cancelled because Beau de Rochas\'s came first.',
+        'Each cylinder fires once every two turns of the crank, so a four-cylinder engine at 3,000 rpm fires 100 times a second.',
+        'Most of the fuel\'s energy leaves as heat. A typical petrol engine turns only about 25 to 35 percent of it into useful work.',
+      ],
       sources: [
         'J. B. Heywood, *Internal Combustion Engine Fundamentals*, McGraw-Hill (1988).',
         'Y. A. Çengel and M. A. Boles, *Thermodynamics: An Engineering Approach* (the Otto cycle).',

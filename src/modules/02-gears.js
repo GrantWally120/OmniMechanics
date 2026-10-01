@@ -57,6 +57,20 @@
         { q: 'The output of a gear train turns slower than the input. What happens to the torque?', opts: ['It rises, because power (speed times torque) stays about the same', 'It falls as well', 'It stays the same', 'It depends on the colour of the gears'], a: 0, why: 'Power is speed times torque and gears lose only a little of it. Less speed has to mean more torque.' },
         { q: 'Two gears mesh directly. Why does the output turn the opposite way?', opts: ['Friction', 'At the contact point the teeth push in opposite directions, so each external mesh reverses the rotation', 'Only when the ratio is above 1', 'It does not'], a: 1, why: 'Every external mesh reverses the direction. Put an idler gear between them and the direction is restored.' },
       ],
+      era: 'Antikythera, 2nd c. BC',
+      level: 2,
+      parts: [
+        { name: 'Driver gear', note: 'The gear that is turned. It is the input.' },
+        { name: 'Driven gear', note: 'The gear that is pushed round by the first one. It is the output.' },
+        { name: 'Teeth', note: 'Shaped as involutes, so that each pair rolls together smoothly.' },
+        { name: 'Pitch circles', note: 'Imaginary circles that roll on each other. Their size ratio is the gear ratio.' },
+        { name: 'Shafts', note: 'Carry the gears and the torque.' },
+      ],
+      facts: [
+        'The Antikythera mechanism, made in the late 2nd century BC, has at least 30 surviving bronze gears and was used to predict the positions of the Sun and Moon.',
+        'Leonhard Euler worked out in 1760 that involute teeth keep meshing correctly even when the gears sit a little too close or too far apart, which is why almost all gears use them.',
+        'A gear train trades speed for torque. Apart from friction, speed times torque stays the same: a shaft that turns half as fast turns with twice the torque.',
+      ],
       sources: [
         'R. G. Budynas and J. K. Nisbett, *Shigley’s Mechanical Engineering Design*, McGraw-Hill (the gear chapters).',
       ],

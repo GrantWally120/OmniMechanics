@@ -75,6 +75,20 @@
         { q: 'Why does the refrigerant boil at about −10 °C inside the evaporator?', opts: ['It is mixed with antifreeze', 'The pressure there is low, and the boiling point falls with pressure', 'The cabinet is an airtight vacuum', 'The compressor heats it'], a: 1, why: 'Every fluid boils at a temperature that depends on pressure. R-134a at about 2 bar boils at roughly −10 °C.' },
         { q: 'You open the fridge door in a sealed kitchen and leave it. What happens to the kitchen temperature?', opts: ['It falls slowly', 'It rises slightly', 'It stays exactly the same', 'It falls quickly'], a: 1, why: 'The fridge adds its electrical energy to the room as heat, and the heat it removes from the room’s own air comes straight back out of the condenser.' },
       ],
+      era: 'Perkins, 1834',
+      level: 4,
+      parts: [
+        { name: 'Compressor', note: 'Raises the pressure and temperature of the refrigerant vapour.' },
+        { name: 'Condenser', note: 'The hot coils at the back, where the vapour gives up its heat and turns to liquid.' },
+        { name: 'Expansion valve', note: 'Drops the pressure, which chills the liquid.' },
+        { name: 'Evaporator', note: 'The cold coil inside, where the liquid boils and takes in heat.' },
+        { name: 'Refrigerant', note: 'R-134a here. The fluid that carries the heat round the loop.' },
+      ],
+      facts: [
+        'Jacob Perkins patented the first vapour-compression refrigerator in 1834. It used ether and a hand-cranked compressor, and had the same four parts as a fridge today.',
+        'The heat that leaves the coils at the back is more than the heat taken from the food. It is the heat from the food plus the work the compressor puts in.',
+        'R-134a replaced the ozone-damaging CFC-12 from the 1990s. It does not harm the ozone layer but it is a strong greenhouse gas: a kilogram of it warms the air about 1,430 times as much as a kilogram of CO~2~ over 100 years, so it is being phased down.',
+      ],
       sources: [
         'Y. A. Çengel and M. A. Boles, *Thermodynamics: An Engineering Approach* (the vapour-compression refrigeration cycle).',
         '*ASHRAE Handbook: Fundamentals* (thermophysical properties of refrigerants).',

@@ -69,6 +69,20 @@
         { q: 'Which of these does not change the period of a small swing?', opts: ['The length of the pendulum', 'The strength of gravity', 'The mass of the bob', 'All three change it'], a: 2, why: 'Mass cancels out: a heavier bob is pulled harder but is also harder to move.' },
         { q: 'Why does the escapement push the pendulum a little on every swing?', opts: ['To make it swing faster', 'To replace the energy lost to air and friction', 'To keep the wheel from turning', 'To make the tick louder'], a: 1, why: 'Without the push, drag would wear the swing away. The escapement gives back exactly what is lost, and the swing settles where the two are equal.' },
       ],
+      era: 'Huygens, 1657',
+      level: 4,
+      parts: [
+        { name: 'Pendulum', note: 'The timekeeper. Its length and gravity fix the beat.' },
+        { name: 'Anchor and pallets', note: 'Rock with the pendulum. The pallets hold the wheel and then let it go.' },
+        { name: 'Escape wheel', note: 'Has 30 teeth here. It moves on half a tooth for every beat.' },
+        { name: 'Drive', note: 'A falling weight or a spring. It turns the wheel and, through the pallets, pushes the pendulum.' },
+      ],
+      facts: [
+        'Christiaan Huygens patented the first pendulum clock in 1657. It cut the error of a good clock from about 15 minutes a day to about 15 seconds.',
+        'A pendulum about 0.994 m long beats seconds, which is why longcase clocks are so tall: the pendulum needs a metre to hang.',
+        'Big Ben is kept to time by adding or taking away old pennies on its pendulum. One penny changes the rate by two fifths of a second a day.',
+        'The dead-beat escapement drawn here was worked out by Richard Towneley around 1675 and made famous by George Graham in 1715.',
+      ],
       sources: [
         'M. V. Headrick, *Clock and Watch Escapement Mechanics* (1997), on the Graham dead-beat escapement.',
         'R. A. Nelson and M. G. Olsson, "The pendulum: rich physics from a simple system", *American Journal of Physics* 54, 112 (1986).',

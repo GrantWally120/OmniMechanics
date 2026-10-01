@@ -62,6 +62,21 @@
         { q: 'What happens to the heat taken up when the sea water evaporated?', opts: ['It is lost for good', 'It is released again when the vapour condenses into cloud', 'It warms the sea', 'It turns into wind'], a: 1, why: 'The heat is stored in the vapour (latent heat). When the vapour condenses the heat comes back, which is why air in a cloud cools more slowly as it rises.' },
         { q: 'Why is the air on the far side of the mountain warmer and drier than when it left the sea?', opts: ['The Sun is stronger there', 'It lost its water as rain, kept the heat from condensation, and sinking air warms by compression', 'The mountain heats it', 'It came from a desert'], a: 1, why: 'Rain removes the water, condensation has added heat to the air, and air sinking down the far side warms by about 9.8 °C per kilometre as it is squeezed.' },
       ],
+      era: 'Perrault, 1674',
+      level: 3,
+      parts: [
+        { name: 'Sun', note: 'Supplies the energy for evaporation.' },
+        { name: 'Sea', note: 'The main source of the vapour.' },
+        { name: 'Cloud', note: 'Condensed droplets, formed above the cloud base.' },
+        { name: 'Mountain', note: 'Forces the damp air upward so it cools.' },
+        { name: 'River', note: 'Carries the rain back to the sea.' },
+      ],
+      facts: [
+        'The oceans hold about 96.5 percent of the water on Earth. About 90 percent of the water vapour in the air comes from evaporation from oceans, seas, lakes and rivers, and the rest from plants.',
+        'A water molecule spends about nine days in the air on average before it falls as rain or snow.',
+        'In 1674 Pierre Perrault measured the rain that falls on the Seine basin and showed that rain alone was enough to feed the river. Until then many people thought springs were fed from the sea.',
+        'Evaporating a kilogram of water takes about 2.5 megajoules at sea temperatures, and 2.26 megajoules at boiling point. The same heat is released when the vapour condenses into cloud.',
+      ],
       sources: [
         'R. R. Rogers and M. K. Yau, *A Short Course in Cloud Physics*, Pergamon (condensation level, moist adiabatic lapse rate).',
         'D. L. Hartmann, *Global Physical Climatology*, Academic Press (evaporation, latent heat, the hydrological cycle).',

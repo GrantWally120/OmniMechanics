@@ -60,6 +60,18 @@
         { q: 'Roughly how fast must a satellite move sideways to stay in low Earth orbit?', opts: ['About 800 km/h', 'About 8,000 km/h', 'About 28,000 km/h', 'About 280,000 km/h'], a: 2, why: '7.67 km/s is about 27,600 km/h.' },
         { q: 'You launch faster than circular speed but slower than escape speed. What path do you follow?', opts: ['A straight line away', 'An ellipse that swings out farther and comes back', 'A smaller circle', 'A spiral into the ground'], a: 1, why: 'Bound orbits are ellipses with the Earth at one focus. Circular is the special case of an ellipse with no stretch.' },
       ],
+      era: 'Newton, 1687',
+      level: 3,
+      parts: [
+        { name: 'Gravity', note: 'Pulls the satellite toward the centre of the Earth all the time.' },
+        { name: 'Velocity', note: 'Sideways speed. It is what keeps the satellite from falling straight down.' },
+        { name: 'Orbit', note: 'The path that results: a circle, an ellipse, or an open curve if the speed is high enough.' },
+      ],
+      facts: [
+        'Newton imagined firing a cannonball sideways from a very high mountain. Fast enough, and it never lands.',
+        'The International Space Station moves at about 7.7 km/s and goes round the Earth every 93 minutes. It is falling all the time and keeps missing the ground.',
+        'The speed needed to escape from the surface of the Earth is 11.2 km/s, which is the square root of 2 times the speed of a low circular orbit.',
+      ],
       sources: [
         'H. D. Curtis, *Orbital Mechanics for Engineering Students*, Butterworth-Heinemann.',
         'I. Newton, *A Treatise of the System of the World* (the cannon thought experiment).',

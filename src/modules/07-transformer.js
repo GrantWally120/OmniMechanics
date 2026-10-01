@@ -65,6 +65,20 @@
         { q: 'Why does a transformer not work on steady DC?', opts: ['The wire is too thick', 'A steady current makes a steady flux, and only a changing flux induces a voltage', 'DC is too weak', 'The core gets too cold'], a: 1, why: 'Voltage comes from the rate of change of flux. With DC the flux stops changing after switch-on.' },
         { q: 'Why is long-distance power sent at very high voltage?', opts: ['High voltage travels faster', 'The same power needs less current, so the wires lose far less energy as heat', 'It is safer', 'Transformers only work at high voltage'], a: 1, why: 'Heat in the wire is I²R. Raising the voltage ten times cuts the current ten times and the loss a hundred times.' },
       ],
+      era: 'ZBD, 1885',
+      level: 3,
+      parts: [
+        { name: 'Primary winding', note: 'The coil connected to the supply.' },
+        { name: 'Secondary winding', note: 'The coil that feeds the load. Its turns decide the output voltage.' },
+        { name: 'Iron core', note: 'Carries the changing magnetic flux from one coil to the other.' },
+        { name: 'Laminations', note: 'Thin insulated sheets that make up the core, to keep wasteful eddy currents small.' },
+      ],
+      facts: [
+        'The word transformer first appears in the 1885 patent of Zipernowsky, Bláthy and Déri at the Ganz works in Budapest. Their closed-core design made power distribution practical.',
+        'Power lines run at hundreds of kilovolts. Ten times the voltage means a tenth of the current for the same power, and a hundredth of the heat lost in the wires.',
+        'A mains transformer hums at twice the mains frequency, 100 or 120 hertz, because iron changes shape slightly in a magnetic field, once for each half cycle.',
+        'Large power transformers are some of the most efficient machines ever made: more than 99 percent of the power goes through.',
+      ],
       sources: [
         'S. J. Chapman, *Electric Machinery Fundamentals*, McGraw-Hill (transformers).',
       ],

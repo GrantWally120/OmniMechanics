@@ -60,6 +60,19 @@
         { q: 'Why does a GPS receiver need four satellites in the real 3D world, not just three?', opts: ['Three satellites cannot be seen at once', 'There is a fourth unknown, the receiver’s own clock error', 'To check the other three', 'To get the altitude only'], a: 1, why: 'The unknowns are x, y, z and the clock error. Four unknowns need four equations.' },
         { q: 'Do GPS satellites know where your phone is?', opts: ['Yes, they track every phone', 'Only when the phone has data', 'No, they only broadcast and the receiver works out its own position', 'Only when you press navigate'], a: 2, why: 'It is one-way. That is why GPS works without any connection and why millions of receivers can use it at once.' },
       ],
+      era: '1978 to 1995',
+      level: 4,
+      parts: [
+        { name: 'Satellites', note: 'At least 24 of them, each broadcasting its position and the time from an atomic clock.' },
+        { name: 'Receiver', note: 'Measures how long each signal took to arrive.' },
+        { name: 'Pseudorange', note: 'The distance worked out from that time, which is wrong by the receiver clock error.' },
+        { name: 'Ground stations', note: 'Track the satellites and send up corrections.' },
+      ],
+      facts: [
+        'The first GPS satellite was launched on 22 February 1978. The system was declared fully operational in 1995, when 24 satellites were in orbit.',
+        'GPS satellite clocks run about 38 microseconds a day faster than clocks on the ground: 45 from weaker gravity, minus 7 from their speed. Left uncorrected, positions would drift by about 10 km a day.',
+        'A receiver needs four satellites because there are four unknowns: the three coordinates of its position and the error of its own clock.',
+      ],
       sources: [
         'E. D. Kaplan and C. J. Hegarty (eds.), *Understanding GPS/GNSS: Principles and Applications*, Artech House (3rd edition, 2017).',
         'N. Ashby, “Relativity in the Global Positioning System”, *Living Reviews in Relativity* 6 (2003).',
